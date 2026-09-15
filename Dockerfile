@@ -13,9 +13,13 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 
-RUN python -m pip install --no-cache-dir .
+# Include the optional X backend in the container image so all v0.1 public
+# content tools are usable from a clean image. Agent Reach already brings yt-dlp.
+RUN python -m pip install --no-cache-dir '.[x]'
 
-RUN useradd --system --create-home --uid 10001 appuser
+RUN useradd --system --create-home --uid 10001 appuser \
+    && mkdir -p /home/appuser/.agent-reach \
+    && chown -R appuser:appuser /home/appuser
 USER appuser
 
 # Streamable HTTP is the useful container transport. Binding to 0.0.0.0 is
