@@ -57,6 +57,10 @@ class TwitterAdapter:
             raise BackendUnavailableError("twitter-cli is not installed")
         env = os.environ.copy()
         env.update(twitter_cli_child_env(self._config))
+        if not env.get("TWITTER_AUTH_TOKEN") or not env.get("TWITTER_CT0"):
+            raise BackendUnavailableError(
+                "explicit Twitter credentials are required; configure TWITTER_AUTH_TOKEN and TWITTER_CT0 through Agent Reach before using X tools"
+            )
         env.update({"OUTPUT": "json", "NO_COLOR": "1", "PYTHONUTF8": "1"})
         try:
             cp = subprocess.run([executable, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=self._timeout, env=env, shell=False, check=False)
