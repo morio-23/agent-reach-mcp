@@ -1,0 +1,25 @@
+[Unit]
+Description=Agent Reach MCP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent-reach-mcp
+Group=agent-reach-mcp
+WorkingDirectory=/opt/agent-reach-mcp
+EnvironmentFile=/etc/agent-reach-mcp.env
+ExecStart=/opt/agent-reach-mcp/.venv/bin/agent-reach-mcp
+Restart=on-failure
+RestartSec=5
+
+# Basic hardening. The service still needs outbound network access and access
+# to its own Agent Reach configuration/credentials.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/agent-reach-mcp
+
+[Install]
+WantedBy=multi-user.target
