@@ -18,11 +18,13 @@ RUN python -m pip install --no-cache-dir .
 RUN useradd --system --create-home --uid 10001 appuser
 USER appuser
 
+# Streamable HTTP is the useful container transport. Binding to 0.0.0.0 is
+# required for Docker port publishing, but unauthenticated remote listening is
+# still rejected by the application unless the operator explicitly configures
+# OAuth/static-token auth or opts into an insecure/private-container boundary.
 ENV AGENT_REACH_MCP_TRANSPORT=streamable-http \
-    AGENT_REACH_MCP_AUTH_MODE=none \
-    AGENT_REACH_MCP_HOST=127.0.0.1 \
-    AGENT_REACH_MCP_PORT=8080 \
-    AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE=false
+    AGENT_REACH_MCP_HOST=0.0.0.0 \
+    AGENT_REACH_MCP_PORT=8080
 
 EXPOSE 8080
 
