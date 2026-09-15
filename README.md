@@ -41,6 +41,8 @@ Endpoint: `http://127.0.0.1:8080/mcp`.
 
 Unauthenticated HTTP cannot bind to a non-loopback address unless `AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE=true` is explicitly set.
 
+For a persistent Linux/WSL2 service, see [`docs/self-hosting.md`](docs/self-hosting.md).
+
 ## ChatGPT
 
 ChatGPT connects to a remote MCP endpoint rather than directly to local stdio. For a private/home-server deployment, prefer loopback `Streamable HTTP` behind OpenAI Secure MCP Tunnel. For a public HTTPS deployment, use OAuth/OIDC.
