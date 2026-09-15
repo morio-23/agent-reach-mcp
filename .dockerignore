@@ -7,6 +7,10 @@ __pycache__
 .ruff_cache
 .mypy_cache
 .env
+.env.*
+.agent-reach
 *.log
+*.pem
+*.key
 dist
 build
