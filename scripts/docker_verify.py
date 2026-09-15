@@ -91,13 +91,20 @@ def main() -> None:
         _run(_compose("build"), env=env, timeout=900)
         print("OK: Docker image builds")
 
+        image_name_result = _run(_compose("config", "--images"), env=env, timeout=30)
+        image_names = [
+            line.strip() for line in image_name_result.stdout.splitlines() if line.strip()
+        ]
+        if not image_names:
+            raise VerificationError("could not resolve the Compose image name")
         image_result = _run(
-            _compose("images", "-q", "agent-reach-mcp"), env=env, timeout=30
+            ["docker", "image", "inspect", image_names[0], "--format", "{{.Id}}"],
+            env=env,
+            timeout=30,
         )
-        image_ids = [line.strip() for line in image_result.stdout.splitlines() if line.strip()]
-        if not image_ids:
+        image_id = image_result.stdout.strip()
+        if not image_id:
             raise VerificationError("could not resolve the Compose image ID")
-        image_id = image_ids[0]
 
         try:
             default_run = subprocess.run(
