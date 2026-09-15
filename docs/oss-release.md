@@ -5,15 +5,16 @@ Use this checklist before changing the repository visibility to public or publis
 ## Repository hygiene
 
 - [ ] No secrets, cookies, OAuth tokens, API keys, private URLs, or machine-specific paths are present in tracked files or git history.
-- [ ] `.env` remains ignored.
+- [ ] `.env` and local `.agent-reach/` state remain ignored.
 - [ ] Example credentials are placeholders only.
 - [ ] README clearly states that this project is independently maintained and not affiliated with Agent Reach maintainers.
-- [ ] LICENSE, SECURITY.md, and CONTRIBUTING.md are present.
+- [ ] LICENSE, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, and CHANGELOG.md are present.
 
 ## Dependency / packaging review
 
 - [ ] Review all direct and transitive dependency licenses.
 - [ ] Confirm the pinned upstream Agent Reach commit remains compatible with the implemented adapter API.
+- [ ] Confirm the optional X extra (`twitter-cli`) is compatible with the current adapter command/schema expectations.
 - [ ] Resolve the current direct GitHub dependency before any PyPI publication. Public package indexes generally do not accept distributions whose metadata requires an arbitrary direct URL dependency.
 - [ ] Until that is resolved, document installation from the GitHub repository/source checkout rather than claiming PyPI support.
 - [ ] Build the package locally and inspect wheel metadata.
@@ -37,15 +38,18 @@ python -m pip install dist/*.whl
 - [ ] YouTube transcript live smoke test succeeds on a known-captioned video.
 - [ ] X live tests are performed when `twitter-cli` credentials are intentionally configured.
 
-GitHub Actions are optional; local verification is sufficient when hosted CI is intentionally disabled.
+GitHub Actions are optional; local verification is sufficient when hosted CI is intentionally disabled. The manual release procedure is documented in `docs/releasing.md`.
 
 ## Container checks
 
 - [ ] `docker build` succeeds.
+- [ ] The clean image contains `twitter-cli` and `yt-dlp` required by the v0.1 X/YouTube tool implementations.
 - [ ] Default container fails closed if started with unauthenticated `0.0.0.0` listening and no explicit override/auth configuration.
 - [ ] `compose.private.yml` publishes only to host loopback.
+- [ ] Agent Reach state persists in the named volume and is writable by the non-root container user.
+- [ ] Interactive Agent Reach X credential configuration survives container recreation.
 - [ ] Public container deployment examples use OAuth and HTTPS at the ingress/reverse proxy.
-- [ ] No credential file is baked into the image.
+- [ ] No credential file is baked into the image or build context.
 
 ## Security review
 
@@ -62,8 +66,10 @@ GitHub Actions are optional; local verification is sufficient when hosted CI is 
 ## Documentation review
 
 - [ ] README install steps work from a fresh checkout.
+- [ ] README clearly distinguishes base install and optional X backend install.
 - [ ] `docs/chatgpt.md` matches current ChatGPT custom-MCP behavior.
 - [ ] `docs/self-hosting.md` works on a clean Linux/WSL2 host.
+- [ ] Docker/Compose instructions work from a clean checkout.
 - [ ] ChatGPT plan/workspace availability language is current at release time.
 - [ ] Static-token auth is described as a generic/private MCP-client option, not assumed to be a ChatGPT UI authentication method.
 
