@@ -41,13 +41,25 @@ Endpoint: `http://127.0.0.1:8080/mcp`.
 
 Unauthenticated HTTP cannot bind to a non-loopback address unless `AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE=true` is explicitly set.
 
+For a persistent Linux/WSL2 service, see [`docs/self-hosting.md`](docs/self-hosting.md).
+
+## ChatGPT
+
+ChatGPT connects to a remote MCP endpoint rather than directly to local stdio. For a private/home-server deployment, prefer loopback `Streamable HTTP` behind OpenAI Secure MCP Tunnel. For a public HTTPS deployment, use OAuth/OIDC.
+
+See [`docs/chatgpt.md`](docs/chatgpt.md) for the deployment and connection guide.
+
+Current ChatGPT custom-MCP availability depends on plan and workspace policy. The server remains usable with other MCP clients even when ChatGPT custom-app access is unavailable for the current account.
+
 ## Authentication
 
 `AGENT_REACH_MCP_AUTH_MODE` supports:
 
 - `none` — stdio, localhost or a private/tunneled deployment.
-- `static_token` — simple Bearer token for private/generic clients.
+- `static_token` — simple Bearer token for generic/private MCP clients.
 - `oauth` — JWT resource-server validation for an external OAuth/OIDC authorization server.
+
+For ChatGPT, prefer the supported no-auth/private-tunnel or OAuth path rather than assuming that a custom static Bearer token can be entered in the ChatGPT app configuration UI.
 
 OAuth mode does **not** implement an authorization server. Use Keycloak/Auth0/Entra/etc. and configure:
 
@@ -87,6 +99,7 @@ The gateway also validates URLs/handles, rejects arbitrary commands, applies bac
 - X automatic OpenCLI fallback is not implemented yet.
 - OAuth supports JWT access tokens; opaque-token introspection is not implemented yet.
 - Live backend availability depends on the user's Agent Reach setup.
+- ChatGPT custom-MCP access depends on the user's current ChatGPT plan/workspace policy.
 
 ## Relationship to Agent Reach
 
