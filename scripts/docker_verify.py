@@ -117,7 +117,8 @@ def main() -> None:
         fail_closed_output = (
             (default_run.stdout or "") + "\n" + (default_run.stderr or "")
         ).lower()
-        if default_run.returncode == 0 or "unauthenticated remote listening is disabled" not in fail_closed_output:
+        expected_error = "unauthenticated remote listening is disabled"
+        if default_run.returncode == 0 or expected_error not in fail_closed_output:
             raise VerificationError(
                 "default image did not fail closed for the expected security reason\n"
                 + fail_closed_output[-3000:]
@@ -193,14 +194,18 @@ def main() -> None:
         print("OK: Streamable HTTP MCP handshake and get_capabilities succeed")
         print("Docker verification passed")
     finally:
-        cleanup = _run(
-            _compose("down", "-v", "--remove-orphans"),
-            env=env,
-            check=False,
-            timeout=120,
-        )
-        if cleanup.returncode != 0:
-            print("WARNING: Docker verification cleanup failed", file=sys.stderr)
+        try:
+            cleanup = _run(
+                _compose("down", "-v", "--remove-orphans"),
+                env=env,
+                check=False,
+                timeout=120,
+            )
+        except VerificationError as exc:
+            print(f"WARNING: Docker verification cleanup could not run: {exc}", file=sys.stderr)
+        else:
+            if cleanup.returncode != 0:
+                print("WARNING: Docker verification cleanup failed", file=sys.stderr)
 
 
 if __name__ == "__main__":
