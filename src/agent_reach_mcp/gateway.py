@@ -12,6 +12,7 @@ from .models import ReadUrlResult
 from .twitter import TwitterAdapter
 from .youtube import YoutubeAdapter
 
+
 class Gateway:
     def __init__(self, settings: Settings):
         self.settings = settings

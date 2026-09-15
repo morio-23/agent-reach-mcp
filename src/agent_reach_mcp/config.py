@@ -1,8 +1,10 @@
 from enum import Enum
 from ipaddress import ip_address
 from urllib.parse import urljoin
+
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class AuthMode(str, Enum):
     NONE = "none"

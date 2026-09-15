@@ -8,7 +8,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 async def run(url: str, token: str | None) -> None:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    async with httpx2.AsyncClient(headers=headers) as http_client:
+    async with httpx2.AsyncClient(headers=headers, timeout=30.0) as http_client:
         transport = streamable_http_client(url=url, http_client=http_client)
         async with Client(transport) as client:
             tools = await client.list_tools()
