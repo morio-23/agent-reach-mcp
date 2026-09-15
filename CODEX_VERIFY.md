@@ -16,8 +16,7 @@ pip install -e '.[dev]'
 
 ```bash
 python -m compileall -q src tests scripts
-ruff check .
-pytest -q
+python -m pytest -q
 python scripts/local_verify.py
 ```
 
@@ -104,4 +103,4 @@ Do not stand up a new identity provider just for this verification. OAuth mode i
 
 Use this exact task to minimize reasoning/token usage:
 
-> On branch `feature/initial-mcp-foundation`, follow `CODEX_VERIFY.md` in order. Do not redesign or refactor. Only fix concrete failures encountered during local verification. Do not run GitHub Actions. After checks pass, report the commands run, results, any fixes made, and remaining live-backend limitations. Commit and push only fixes that were required by failed checks; otherwise make no code changes.
+> On branch `feature/initial-mcp-foundation`, follow `CODEX_VERIFY.md` in order. Do not redesign or refactor. Only fix concrete failures encountered during local verification. Do not run GitHub Actions or perform broad code review. After checks pass, report the commands run, results, any fixes made, and remaining live-backend limitations. Commit and push only fixes required by failed checks; otherwise make no code changes.
