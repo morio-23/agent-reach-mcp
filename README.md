@@ -1,26 +1,10 @@
 # agent-reach-mcp
 
-Remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Agent-Reach), designed for ChatGPT and other MCP clients.
+Read-only remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Agent-Reach), designed for ChatGPT and other MCP clients.
 
-> Status: early development. The repository is currently private while the public OSS shape is stabilized.
+> Status: v0.1 development. Private until the initial API and OSS release shape are stable.
 
-## Goals
-
-- Expose Agent Reach capabilities through stable, intent-oriented MCP tools.
-- Support remote MCP clients such as ChatGPT without exposing arbitrary shell execution.
-- Normalize backend-specific output into predictable structured results.
-- Keep authentication optional and pluggable.
-- Remain a thin facade so upstream Agent Reach can evolve independently.
-
-## Non-goals
-
-- Reimplement Agent Reach backends.
-- Expose arbitrary command execution, shell access, cookies, API keys, or local files.
-- Become an identity provider. OAuth deployments should validate tokens issued by an external authorization server.
-
-## Planned MCP tools
-
-### v0.1
+## Initial tools
 
 - `get_capabilities`
 - `read_url`
@@ -29,104 +13,84 @@ Remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Agent-Reach)
 - `get_x_post`
 - `get_youtube_transcript`
 
-Additional platforms will be added after the initial schemas stabilize.
-
-## Authentication modes
-
-`agent-reach-mcp` is designed to support multiple deployment patterns:
-
-- `none` — local development or a private/tunneled deployment.
-- `static_token` — simple bearer token for generic MCP clients.
-- `oauth` — recommended for an internet-exposed remote MCP server.
-- `trusted_proxy` — reserved for deployments protected by an upstream access gateway.
-
-The default is `none`, but unauthenticated non-loopback HTTP listening is rejected unless explicitly allowed.
-
-## Security model
-
-Internet content is untrusted data. This gateway does not execute instructions found in retrieved content.
-
-The MCP surface intentionally does **not** provide tools such as `exec`, `shell`, `run_command`, arbitrary CLI execution, credential retrieval, or unrestricted local file access.
-
-Backend processes must be invoked with argument arrays rather than `shell=True`, and adapters will enforce timeouts, result limits, and output-size limits.
-
-## Architecture
-
-```text
-ChatGPT / MCP client
-        |
-        | MCP (stdio for development, Streamable HTTP for remote use)
-        v
-+---------------------------+
-| agent-reach-mcp           |
-|                           |
-| MCP tools                 |
-| auth providers            |
-| validation / limits       |
-| output normalization      |
-| capability routing        |
-+-------------+-------------+
-              |
-              v
-         Agent Reach
-              |
-       upstream backends
-```
+No shell, arbitrary CLI, write operations, credential retrieval, or unrestricted local-file access is exposed.
 
 ## Development
 
-Requirements:
-
-- Python 3.10+
-- Agent Reach and any upstream backends required for the capabilities you want to use
-
-Install in editable mode:
-
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -U pip
 pip install -e '.[dev]'
+pytest -q
+python scripts/local_verify.py
 ```
 
-Run tests:
+`local_verify.py` uses the MCP SDK's in-process client, lists all tools and calls `get_capabilities` without needing ChatGPT.
+
+## Streamable HTTP
 
 ```bash
-pytest
-```
-
-Run the MCP server over stdio:
-
-```bash
+AGENT_REACH_MCP_TRANSPORT=streamable-http \
+AGENT_REACH_MCP_HOST=127.0.0.1 \
+AGENT_REACH_MCP_PORT=8080 \
 agent-reach-mcp
 ```
 
-Remote Streamable HTTP support is part of the v0.1 implementation plan.
+Endpoint: `http://127.0.0.1:8080/mcp`.
 
-## Configuration
+Unauthenticated HTTP cannot bind to a non-loopback address unless `AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE=true` is explicitly set.
 
-Configuration is environment-variable based. Planned variables include:
+## Authentication
+
+`AGENT_REACH_MCP_AUTH_MODE` supports:
+
+- `none` — stdio, localhost or a private/tunneled deployment.
+- `static_token` — simple Bearer token for private/generic clients.
+- `oauth` — JWT resource-server validation for an external OAuth/OIDC authorization server.
+
+OAuth mode does **not** implement an authorization server. Use Keycloak/Auth0/Entra/etc. and configure:
 
 ```env
-AGENT_REACH_MCP_AUTH_MODE=none
-AGENT_REACH_MCP_HOST=127.0.0.1
-AGENT_REACH_MCP_PORT=8080
-AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE=false
-
-# static_token mode
-AGENT_REACH_MCP_STATIC_TOKEN=
-
-# oauth mode
-AGENT_REACH_MCP_OAUTH_ISSUER=
-AGENT_REACH_MCP_OAUTH_AUDIENCE=
+AGENT_REACH_MCP_AUTH_MODE=oauth
+AGENT_REACH_MCP_PUBLIC_BASE_URL=https://mcp.example.com
+AGENT_REACH_MCP_OAUTH_ISSUER=https://auth.example.com/realms/agent-reach
+AGENT_REACH_MCP_OAUTH_AUDIENCE=agent-reach-mcp
+AGENT_REACH_MCP_OAUTH_SCOPES=agent-reach:read
 ```
 
-Secrets must never be committed to the repository.
+JWT signatures are checked through OIDC discovery/JWKS (or `AGENT_REACH_MCP_OAUTH_JWKS_URL`).
+
+## X
+
+The first implementation uses Agent Reach's `twitter-cli` path. The gateway invokes it with an argv array, `shell=False`, a timeout, JSON output and a response-size limit. Explicit Agent Reach Twitter credentials are injected only into that child process and are never returned to MCP clients.
+
+Examples of underlying live checks before MCP testing:
+
+```bash
+agent-reach doctor
+twitter user-posts OpenAI --max 2 --json
+```
+
+## YouTube
+
+`get_youtube_transcript` uses existing manual/automatic subtitles via `yt-dlp`. Audio transcription fallback is deliberately not automatic because it may invoke external ASR providers and introduce privacy/cost implications.
+
+## Security
+
+Retrieved web/social/video content is untrusted data. It is returned as data and is never interpreted server-side as instructions.
+
+The gateway also validates URLs/handles, rejects arbitrary commands, applies backend timeouts and size limits, and scrubs errors before returning them through MCP.
+
+## Current limitations
+
+- X automatic OpenCLI fallback is not implemented yet.
+- OAuth supports JWT access tokens; opaque-token introspection is not implemented yet.
+- Live backend availability depends on the user's Agent Reach setup.
 
 ## Relationship to Agent Reach
 
-Agent Reach remains responsible for installing, configuring, and checking the capabilities/backends it supports. This project provides a safe, stable MCP-facing facade over those capabilities.
-
-Agent Reach is MIT licensed. This project is independently maintained and is not affiliated with the Agent Reach maintainers.
+Agent Reach remains responsible for capability setup and backend configuration. This project is an independently maintained MCP facade and is not affiliated with Agent Reach maintainers.
 
 ## License
 
