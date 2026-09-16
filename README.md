@@ -26,6 +26,18 @@ pytest -q
 python scripts/local_verify.py
 ```
 
+Install the optional X backend when you want to use the X tools from a source checkout:
+
+```bash
+pip install -e '.[x]'
+```
+
+For development with X enabled, install both extras:
+
+```bash
+pip install -e '.[dev,x]'
+```
+
 `local_verify.py` uses the MCP SDK's in-process client, lists all tools and calls `get_capabilities` without needing ChatGPT.
 
 ## Streamable HTTP
@@ -42,6 +54,29 @@ Endpoint: `http://127.0.0.1:8080/mcp`.
 Unauthenticated HTTP cannot bind to a non-loopback address unless `AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE=true` is explicitly set.
 
 For a persistent Linux/WSL2 service, see [`docs/self-hosting.md`](docs/self-hosting.md).
+
+## Docker
+
+The container image includes the optional `twitter-cli` backend and Agent Reach's YouTube dependency. The image itself remains fail-closed: unauthenticated `0.0.0.0` listening is rejected unless the deployment explicitly opts into a private container boundary or configures authentication.
+
+Private loopback-only example:
+
+```bash
+docker compose -f compose.private.yml build
+docker compose -f compose.private.yml up -d
+python scripts/http_verify.py
+```
+
+`compose.private.yml` publishes the MCP port only on host `127.0.0.1` and persists Agent Reach configuration in a named volume at `/home/appuser/.agent-reach`.
+
+To configure X credentials interactively inside that persisted volume, use Agent Reach's manual Cookie-Editor flow rather than baking credentials into the image:
+
+```bash
+docker compose -f compose.private.yml run --rm --entrypoint agent-reach \
+  agent-reach-mcp configure twitter-cookies
+```
+
+Never commit or copy the resulting Agent Reach configuration into the image.
 
 ## ChatGPT
 
@@ -100,6 +135,7 @@ The gateway also validates URLs/handles, rejects arbitrary commands, applies bac
 - OAuth supports JWT access tokens; opaque-token introspection is not implemented yet.
 - Live backend availability depends on the user's Agent Reach setup.
 - ChatGPT custom-MCP access depends on the user's current ChatGPT plan/workspace policy.
+- Source/PyPI packaging still depends on a pinned upstream Agent Reach GitHub commit; PyPI publication is intentionally not claimed yet.
 
 ## Relationship to Agent Reach
 

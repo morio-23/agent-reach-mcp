@@ -29,6 +29,12 @@ sudo -u agent-reach-mcp /opt/agent-reach-mcp/.venv/bin/pip install -U pip
 sudo -u agent-reach-mcp /opt/agent-reach-mcp/.venv/bin/pip install -e /opt/agent-reach-mcp
 ```
 
+Install the optional X backend if this host will expose the X MCP tools:
+
+```bash
+sudo -u agent-reach-mcp /opt/agent-reach-mcp/.venv/bin/pip install -e '/opt/agent-reach-mcp[x]'
+```
+
 While this repository remains private, use an authenticated Git checkout appropriate for your environment. Do not place a GitHub token in the systemd unit or tracked files.
 
 ## 2. Configure the service
@@ -43,7 +49,7 @@ sudo chmod 640 /etc/agent-reach-mcp.env
 
 The private/tunnel configuration intentionally binds only to `127.0.0.1` and uses `AUTH_MODE=none`.
 
-If X is enabled, add the explicit `TWITTER_AUTH_TOKEN` / `TWITTER_CT0` values to the protected environment file or use the Agent Reach configuration mechanism available to the service account. Never commit them.
+Agent Reach stores persistent configuration under the service user's `~/.agent-reach/` directory. If X is enabled, prefer Agent Reach's manual Cookie-Editor import flow under that service identity, or place the explicit `TWITTER_AUTH_TOKEN` / `TWITTER_CT0` values in the protected environment file. Never commit them.
 
 ## 3. Install systemd unit
 
@@ -88,6 +94,33 @@ sudo -u agent-reach-mcp /opt/agent-reach-mcp/.venv/bin/agent-reach doctor
 For X, first verify the upstream CLI independently before testing through MCP.
 
 For YouTube, verify `yt-dlp`/JS-runtime health according to Agent Reach doctor output.
+
+## Docker / Compose alternative
+
+The repository also includes a private Compose example:
+
+```bash
+docker compose -f compose.private.yml build
+docker compose -f compose.private.yml up -d
+python scripts/http_verify.py
+```
+
+It publishes only `127.0.0.1:8080` on the host. The application listens on `0.0.0.0` only inside the container so Docker can publish the port.
+
+Agent Reach state is persisted in the `agent-reach-data` named volume at `/home/appuser/.agent-reach`. Configure X credentials interactively without baking them into the image:
+
+```bash
+docker compose -f compose.private.yml run --rm --entrypoint agent-reach \
+  agent-reach-mcp configure twitter-cookies
+```
+
+Then restart the service:
+
+```bash
+docker compose -f compose.private.yml up -d
+```
+
+Do not copy `.agent-reach` state into the repository or Docker build context.
 
 ## WSL2 notes
 

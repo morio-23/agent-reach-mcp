@@ -1,0 +1,24 @@
+services:
+  agent-reach-mcp:
+    build: .
+    restart: unless-stopped
+    environment:
+      AGENT_REACH_MCP_TRANSPORT: streamable-http
+      AGENT_REACH_MCP_AUTH_MODE: none
+      AGENT_REACH_MCP_HOST: 0.0.0.0
+      AGENT_REACH_MCP_PORT: 8080
+      # The container listens on all container interfaces so Docker can publish
+      # the port, but the host publish below is loopback-only. This explicit
+      # override acknowledges that the container network itself is not the
+      # authentication boundary.
+      AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE: "true"
+    ports:
+      - "127.0.0.1:${AGENT_REACH_MCP_HOST_PORT:-8080}:8080"
+    volumes:
+      # Agent Reach stores persistent configuration and manually imported
+      # credentials under ~/.agent-reach. Keep it outside the image and never
+      # commit its contents.
+      - agent-reach-data:/home/appuser/.agent-reach
+
+volumes:
+  agent-reach-data:
