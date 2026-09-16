@@ -69,9 +69,8 @@ def _audit_history_filenames() -> None:
 
 
 def _secret_pattern() -> str:
-    # Keep this source file out of the search so pattern literals cannot
-    # self-match. Use POSIX ERE syntax because Git for Windows does not
-    # guarantee PCRE constructs such as non-capturing groups for `grep -E`.
+    # The audit source is filtered from grep results in Python so these pattern
+    # literals cannot self-trigger the audit. Use only POSIX ERE syntax.
     patterns = [
         r"-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
         r"AKIA[0-9A-Z]{16}",
@@ -91,20 +90,10 @@ def _audit_history_content() -> None:
 
     regex = _secret_pattern()
     hits: set[str] = set()
+    self_marker = f":{SELF_PATH}:"
     for commit in commits:
         result = _run(
-            [
-                "git",
-                "grep",
-                "-I",
-                "-n",
-                "-E",
-                regex,
-                commit,
-                "--",
-                ".",
-                f":(exclude){SELF_PATH}",
-            ],
+            ["git", "grep", "-I", "-n", "-E", regex, commit, "--", "."],
             check=False,
             timeout=60,
         )
@@ -112,8 +101,9 @@ def _audit_history_content() -> None:
             raise AuditError(f"git grep failed while scanning {commit}: {(result.stderr or '').strip()}")
         if result.returncode == 0:
             for line in result.stdout.splitlines():
-                if line.strip():
-                    hits.add(line.strip())
+                line = line.strip()
+                if line and self_marker not in line:
+                    hits.add(line)
 
     if hits:
         raise AuditError(
