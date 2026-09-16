@@ -6,6 +6,7 @@ venv/
 .env
 .agent-reach/
 .release-audit/
+.dogfood/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
