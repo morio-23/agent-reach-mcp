@@ -2,7 +2,7 @@
 
 Read-only remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Agent-Reach), designed for ChatGPT and other MCP clients.
 
-> Status: v0.1 development. Private until the initial API and OSS release shape are stable.
+> Status: v0.1 pre-release. Install from source; PyPI publication is not currently supported because the official Agent Reach dependency is pinned to GitHub source.
 
 ## Initial tools
 
