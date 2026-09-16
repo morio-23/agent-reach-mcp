@@ -5,6 +5,7 @@ __pycache__/
 venv/
 .env
 .agent-reach/
+.release-audit/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
