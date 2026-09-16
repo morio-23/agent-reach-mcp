@@ -9,6 +9,7 @@ __pycache__
 .env
 .env.*
 .agent-reach
+.release-audit
 *.log
 *.pem
 *.key
