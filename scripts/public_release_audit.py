@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -70,10 +69,11 @@ def _audit_history_filenames() -> None:
 
 
 def _secret_pattern() -> str:
-    # Keep the audit source itself out of the search so pattern literals cannot
-    # self-match. These are intentionally high-confidence token/key signatures.
+    # Keep this source file out of the search so pattern literals cannot
+    # self-match. Use POSIX ERE syntax because Git for Windows does not
+    # guarantee PCRE constructs such as non-capturing groups for `grep -E`.
     patterns = [
-        r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
+        r"-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
         r"AKIA[0-9A-Z]{16}",
         r"github_pat_[A-Za-z0-9_]{20,}",
         r"gh[pousr]_[A-Za-z0-9]{20,}",
@@ -81,7 +81,7 @@ def _secret_pattern() -> str:
         r"xox[baprs]-[A-Za-z0-9-]{20,}",
         r"AIza[0-9A-Za-z_-]{35}",
     ]
-    return "(?:" + ")|(?:".join(patterns) + ")"
+    return "(" + ")|(".join(patterns) + ")"
 
 
 def _audit_history_content() -> None:
