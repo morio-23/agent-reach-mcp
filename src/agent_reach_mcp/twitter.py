@@ -1,21 +1,38 @@
 import asyncio
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from agent_reach.channels.twitter import twitter_cli_child_env
 from agent_reach.config import Config
+from agent_reach.utils.url import normalize_public_http_url
 
 from .errors import BackendExecutionError, BackendUnavailableError
 from .models import AuthorInfo, ContentItem, ItemResult, SourceInfo
 
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 _TWEET_ID_RE = re.compile(r"^\d{1,30}$")
+_MAX_IMAGE_COUNT = 4
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_ALT_TEXT_CHARS = 1000
+_MAX_REDIRECTS = 3
+
+
+@dataclass(frozen=True)
+class _ImageUpload:
+    data: bytes
+    media_type: str
+    alt_text: str | None = None
 
 
 class TwitterAdapter:
@@ -83,7 +100,12 @@ class TwitterAdapter:
             )
 
     async def post(
-        self, text: str, confirm: bool = False, reply_to: str | None = None
+        self,
+        text: str,
+        confirm: bool = False,
+        reply_to: str | None = None,
+        media_urls: list[str] | None = None,
+        media_alt_texts: list[str] | None = None,
     ) -> ItemResult:
         if not self._write_enabled:
             raise BackendUnavailableError(
@@ -97,9 +119,19 @@ class TwitterAdapter:
         reply_id = (
             _tweet_id_from_ref(_validate_post_ref(reply_to)) if reply_to else None
         )
+        urls, alt_texts = _validate_media_inputs(media_urls, media_alt_texts)
+        uploads: list[_ImageUpload] = []
+        if urls:
+            downloaded = await asyncio.gather(
+                *(asyncio.to_thread(_download_public_image, url) for url in urls)
+            )
+            uploads = [
+                _ImageUpload(data=data, media_type=media_type, alt_text=alt_texts[index])
+                for index, (data, media_type) in enumerate(downloaded)
+            ]
         return await self._run_twifork(
             "post",
-            lambda client: client.create_tweet(text=text, reply_to=reply_id),
+            lambda client: _create_tweet_with_media(client, text, reply_id, uploads),
             normalizer=lambda tweet: _twifork_result([tweet], write=True),
         )
 
@@ -294,6 +326,154 @@ class TwitterAdapter:
             raise BackendExecutionError(
                 f"twifork {operation_name} failed: {message[:500]}"
             ) from exc
+
+
+async def _create_tweet_with_media(
+    client: Any,
+    text: str,
+    reply_id: str | None,
+    uploads: list[_ImageUpload],
+) -> Any:
+    media_ids: list[str] = []
+    for upload in uploads:
+        media_id = await client.upload_media(
+            upload.data,
+            media_type=upload.media_type,
+        )
+        if upload.alt_text:
+            await client.create_media_metadata(media_id, alt_text=upload.alt_text)
+        media_ids.append(media_id)
+    return await client.create_tweet(
+        text=text,
+        media_ids=media_ids or None,
+        reply_to=reply_id,
+    )
+
+
+def _validate_media_inputs(
+    media_urls: list[str] | None,
+    media_alt_texts: list[str] | None,
+) -> tuple[list[str], list[str | None]]:
+    urls = list(media_urls or [])
+    if len(urls) > _MAX_IMAGE_COUNT:
+        raise ValueError(f"media_urls supports at most {_MAX_IMAGE_COUNT} images")
+    normalized_urls = [_validate_public_image_url(url) for url in urls]
+
+    if media_alt_texts is None:
+        return normalized_urls, [None] * len(normalized_urls)
+
+    alt_texts = list(media_alt_texts)
+    if len(alt_texts) != len(normalized_urls):
+        raise ValueError("media_alt_texts must have the same length as media_urls")
+    normalized_alt_texts: list[str | None] = []
+    for alt_text in alt_texts:
+        value = alt_text.strip()
+        if len(value) > _MAX_ALT_TEXT_CHARS:
+            raise ValueError(
+                f"media alt text must be at most {_MAX_ALT_TEXT_CHARS} characters"
+            )
+        normalized_alt_texts.append(value or None)
+    return normalized_urls, normalized_alt_texts
+
+
+def _validate_public_image_url(url: str) -> str:
+    normalized = normalize_public_http_url(url)
+    parsed = urlparse(normalized)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("media URLs must use HTTPS")
+    return normalized
+
+
+def _download_public_image(url: str) -> tuple[bytes, str]:
+    current = _validate_public_image_url(url)
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    for redirect_count in range(_MAX_REDIRECTS + 1):
+        _assert_public_dns(current)
+        request = urllib.request.Request(
+            current,
+            headers={
+                "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.1",
+                "User-Agent": "agent-reach-mcp/0.1",
+            },
+        )
+        try:
+            with opener.open(request, timeout=15) as response:
+                declared_length = response.headers.get("Content-Length")
+                if declared_length:
+                    try:
+                        if int(declared_length) > _MAX_IMAGE_BYTES:
+                            raise ValueError(
+                                f"image exceeds {_MAX_IMAGE_BYTES} byte limit"
+                            )
+                    except ValueError as exc:
+                        if "image exceeds" in str(exc):
+                            raise
+                data = response.read(_MAX_IMAGE_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            if exc.code in {301, 302, 303, 307, 308}:
+                location = exc.headers.get("Location")
+                if not location:
+                    raise BackendExecutionError(
+                        "image download redirect did not include a Location header"
+                    ) from None
+                if redirect_count >= _MAX_REDIRECTS:
+                    raise BackendExecutionError(
+                        "image download exceeded redirect limit"
+                    ) from None
+                current = _validate_public_image_url(urljoin(current, location))
+                continue
+            raise BackendExecutionError(
+                f"image download failed with HTTP {exc.code}"
+            ) from None
+        except (OSError, urllib.error.URLError) as exc:
+            raise BackendExecutionError(
+                f"image download failed: {str(exc)[:300]}"
+            ) from None
+
+        if len(data) > _MAX_IMAGE_BYTES:
+            raise ValueError(f"image exceeds {_MAX_IMAGE_BYTES} byte limit")
+        media_type = _detect_image_mime(data)
+        return data, media_type
+
+    raise BackendExecutionError("image download exceeded redirect limit")
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _assert_public_dns(url: str) -> None:
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        raise ValueError("media URL must include a hostname")
+    try:
+        addresses = socket.getaddrinfo(
+            host,
+            parsed.port or 443,
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as exc:
+        raise BackendExecutionError(
+            f"image hostname could not be resolved: {host}"
+        ) from exc
+    if not addresses:
+        raise BackendExecutionError(f"image hostname could not be resolved: {host}")
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if not ip.is_global:
+            raise ValueError("media URL must resolve only to public IP addresses")
+
+
+def _detect_image_mime(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    raise ValueError("media must be a PNG, JPEG, or WebP image")
 
 
 async def _collect_twifork_pages(page: Any, limit: int) -> tuple[list[Any], bool]:
