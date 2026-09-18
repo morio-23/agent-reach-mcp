@@ -113,7 +113,7 @@ JWT signatures are checked through OIDC discovery/JWKS (or `AGENT_REACH_MCP_OAUT
 
 The primary X read path uses Agent Reach's `twitter-cli`. When `AGENT_REACH_MCP_X_TWIFORK_FALLBACK_ENABLED=true` (the default), read failures can fall back to Twifork using the same explicitly configured `auth_token` and `ct0` cookies. The gateway keeps twitter-cli as the primary backend and reports the backend that served each result.
 
-Optional X posting is deliberately off by default. Set `AGENT_REACH_MCP_X_WRITE_ENABLED=true` to expose `post_x`; each call must also pass `confirm=true`. The initial write path uses Twifork and supports a plain text post or reply. Do not enable write tools on a broadly shared or insufficiently authenticated MCP endpoint.
+Optional X posting is deliberately off by default. Set `AGENT_REACH_MCP_X_WRITE_ENABLED=true` to expose `post_x`; each call must also pass `confirm=true`. The write path uses Twifork and supports plain-text posts/replies plus 1-4 attached images supplied as public HTTPS URLs. Images are downloaded with a 5 MiB per-image limit, restricted to PNG/JPEG/WebP, and DNS targets are rejected unless they resolve only to public IP addresses. Optional `media_alt_texts` can be supplied in the same order as `media_urls`. Local file paths are not exposed through MCP. Do not enable write tools on a broadly shared or insufficiently authenticated MCP endpoint.
 
 Examples of underlying live checks before MCP testing:
 
@@ -135,7 +135,7 @@ The gateway also validates URLs/handles, rejects arbitrary commands, applies bac
 ## Current limitations
 
 - Twifork is a fallback for the current X read tools; it is not a full automatic backend router for every X operation.
-- X posting currently supports plain text posts/replies only; media upload and delete/like/repost actions are not exposed.
+- X posting supports plain-text posts/replies and up to four PNG/JPEG/WebP images from public HTTPS URLs. Video/GIF upload and delete/like/repost actions are not exposed.
 - OAuth supports JWT access tokens; opaque-token introspection is not implemented yet.
 - Live backend availability depends on the user's Agent Reach setup.
 - ChatGPT custom-MCP access depends on the user's current ChatGPT plan/workspace policy.
