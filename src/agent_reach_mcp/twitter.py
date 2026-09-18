@@ -392,22 +392,21 @@ def _download_public_image(url: str) -> tuple[bytes, str]:
         request = urllib.request.Request(
             current,
             headers={
-                "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.1",
+                "Accept": "image/webp,image/png,image/jpeg,*/*;q=0.1",
                 "User-Agent": "agent-reach-mcp/0.1",
             },
         )
         try:
             with opener.open(request, timeout=15) as response:
                 declared_length = response.headers.get("Content-Length")
+                declared_size: int | None = None
                 if declared_length:
                     try:
-                        if int(declared_length) > _MAX_IMAGE_BYTES:
-                            raise ValueError(
-                                f"image exceeds {_MAX_IMAGE_BYTES} byte limit"
-                            )
-                    except ValueError as exc:
-                        if "image exceeds" in str(exc):
-                            raise
+                        declared_size = int(declared_length)
+                    except ValueError:
+                        declared_size = None
+                if declared_size is not None and declared_size > _MAX_IMAGE_BYTES:
+                    raise ValueError(f"image exceeds {_MAX_IMAGE_BYTES} byte limit")
                 data = response.read(_MAX_IMAGE_BYTES + 1)
         except urllib.error.HTTPError as exc:
             if exc.code in {301, 302, 303, 307, 308}:
@@ -425,7 +424,7 @@ def _download_public_image(url: str) -> tuple[bytes, str]:
             raise BackendExecutionError(
                 f"image download failed with HTTP {exc.code}"
             ) from None
-        except (OSError, urllib.error.URLError) as exc:
+        except OSError as exc:
             raise BackendExecutionError(
                 f"image download failed: {str(exc)[:300]}"
             ) from None
