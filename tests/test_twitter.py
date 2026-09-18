@@ -1,9 +1,13 @@
+import socket
 from types import SimpleNamespace
 
 import pytest
 
+import agent_reach_mcp.twitter as twitter_module
+
 from agent_reach_mcp.twitter import (
     _ImageUpload,
+    _assert_public_dns,
     _collect_twifork_pages,
     _create_tweet_with_media,
     _detect_image_mime,
@@ -147,6 +151,18 @@ def test_media_input_validation() -> None:
             [f"https://images.example.com/{i}.png" for i in range(5)],
             None,
         )
+
+
+def test_public_dns_rejects_private_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        twitter_module.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
+        ],
+    )
+    with pytest.raises(ValueError, match="public IP"):
+        _assert_public_dns("https://images.example.com/one.png")
 
 
 def test_detect_image_mime() -> None:
