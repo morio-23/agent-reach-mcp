@@ -23,6 +23,9 @@ class FakeGateway:
     async def get_x_post(self, *args: Any) -> dict[str, Any]:
         return {"items": [], "args": list(args)}
 
+    async def post_x(self, *args: Any) -> dict[str, Any]:
+        return {"items": [], "args": list(args)}
+
     async def get_youtube_transcript(self, *args: Any) -> dict[str, Any]:
         return {"content": "transcript", "args": list(args)}
 
@@ -43,4 +46,27 @@ async def test_server_exposes_expected_tools() -> None:
         }
         result = await client.call_tool("read_url", {"url": "https://example.com"})
         assert not result.is_error
-        assert result.structured_content == {"url": "https://example.com", "content": "test", "max_chars": None}
+        assert result.structured_content == {
+            "url": "https://example.com",
+            "content": "test",
+            "max_chars": None,
+        }
+
+
+@pytest.mark.asyncio
+async def test_server_exposes_post_x_only_when_enabled() -> None:
+    settings = Settings(x_write_enabled=True, _env_file=None)
+    mcp = create_mcp(settings, gateway=FakeGateway())  # type: ignore[arg-type]
+    async with Client(mcp) as client:
+        page = await client.list_tools()
+        names = {tool.name for tool in page.tools}
+        assert "post_x" in names
+        result = await client.call_tool(
+            "post_x",
+            {"text": "hello", "confirm": True, "reply_to": "123"},
+        )
+        assert not result.is_error
+        assert result.structured_content == {
+            "items": [],
+            "args": ["hello", True, "123"],
+        }
