@@ -1,6 +1,6 @@
 # agent-reach-mcp
 
-Read-only remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Agent-Reach), designed for ChatGPT and other MCP clients.
+Remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Agent-Reach), designed for ChatGPT and other MCP clients. Read operations are the default; X posting is an explicit opt-in.
 
 > Status: v0.1 pre-release. Install from source; PyPI publication is not currently supported because the official Agent Reach dependency is pinned to GitHub source.
 
@@ -14,7 +14,7 @@ Read-only remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Ag
 - `post_x` (only when `AGENT_REACH_MCP_X_WRITE_ENABLED=true`)
 - `get_youtube_transcript`
 
-No shell, arbitrary CLI, write operations, credential retrieval, or unrestricted local-file access is exposed.
+No shell, arbitrary CLI, credential retrieval, or unrestricted local-file access is exposed. X write access is absent by default and is exposed only when explicitly enabled.
 
 ## Development
 
@@ -58,7 +58,7 @@ For a persistent Linux/WSL2 service, see [`docs/self-hosting.md`](docs/self-host
 
 ## Docker
 
-The container image includes the optional `twitter-cli` backend and Agent Reach's YouTube dependency. The image itself remains fail-closed: unauthenticated `0.0.0.0` listening is rejected unless the deployment explicitly opts into a private container boundary or configures authentication.
+The container image includes the optional X backends (`twitter-cli` and Twifork) and Agent Reach's YouTube dependency. The image itself remains fail-closed: unauthenticated `0.0.0.0` listening is rejected unless the deployment explicitly opts into a private container boundary or configures authentication.
 
 Private loopback-only example:
 
