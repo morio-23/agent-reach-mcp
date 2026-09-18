@@ -424,10 +424,8 @@ def _download_public_image(url: str) -> tuple[bytes, str]:
             raise BackendExecutionError(
                 f"image download failed with HTTP {exc.code}"
             ) from None
-        except OSError as exc:
-            raise BackendExecutionError(
-                f"image download failed: {str(exc)[:300]}"
-            ) from None
+        except OSError:
+            raise BackendExecutionError("image download failed") from None
 
         if len(data) > _MAX_IMAGE_BYTES:
             raise ValueError(f"image exceeds {_MAX_IMAGE_BYTES} byte limit")

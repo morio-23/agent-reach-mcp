@@ -4,13 +4,15 @@ from types import SimpleNamespace
 import pytest
 
 import agent_reach_mcp.twitter as twitter_module
+from agent_reach_mcp.errors import BackendExecutionError
 from agent_reach_mcp.twitter import (
     TwitterAdapter,
-    _ImageUpload,
     _assert_public_dns,
     _collect_twifork_pages,
     _create_tweet_with_media,
     _detect_image_mime,
+    _download_public_image,
+    _ImageUpload,
     _normalize_tweet,
     _normalize_twifork_tweet,
     _to_single_result,
@@ -194,6 +196,30 @@ def test_detect_image_mime() -> None:
     assert _detect_image_mime(b"RIFFxxxxWEBPrest") == "image/webp"
     with pytest.raises(ValueError, match="PNG, JPEG, or WebP"):
         _detect_image_mime(b"GIF89a")
+
+
+def test_download_error_does_not_expose_url_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "TOPSECRET_QUERY_VALUE"
+
+    class FailingOpener:
+        def open(self, request, timeout):
+            raise OSError(
+                f"failed URL https://images.example.com/a.png?token={secret}"
+            )
+
+    monkeypatch.setattr(twitter_module, "_assert_public_dns", lambda url: None)
+    monkeypatch.setattr(
+        twitter_module.urllib.request,
+        "build_opener",
+        lambda handler: FailingOpener(),
+    )
+    with pytest.raises(BackendExecutionError) as exc_info:
+        _download_public_image(
+            f"https://images.example.com/a.png?token={secret}"
+        )
+    assert secret not in str(exc_info.value)
 
 
 class FakePage:
