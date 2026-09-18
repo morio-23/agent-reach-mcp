@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 import agent_reach_mcp.twitter as twitter_module
-
 from agent_reach_mcp.twitter import (
+    TwitterAdapter,
     _ImageUpload,
     _assert_public_dns,
     _collect_twifork_pages,
@@ -102,6 +102,29 @@ class FakeTwiforkClient:
             "reply_to": reply_to,
         }
         return SimpleNamespace(id="789", text=text, user=None)
+
+
+@pytest.mark.asyncio
+async def test_post_requires_confirmation_before_fetching_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = TwitterAdapter(
+        SimpleNamespace(),
+        timeout_seconds=1,
+        max_output_bytes=1024,
+        write_enabled=True,
+    )
+
+    def fail_if_called(url: str) -> tuple[bytes, str]:
+        raise AssertionError(f"media fetch should not run: {url}")
+
+    monkeypatch.setattr(twitter_module, "_download_public_image", fail_if_called)
+    with pytest.raises(ValueError, match="confirm=true"):
+        await adapter.post(
+            "hello",
+            confirm=False,
+            media_urls=["https://images.example.com/one.png"],
+        )
 
 
 @pytest.mark.asyncio
