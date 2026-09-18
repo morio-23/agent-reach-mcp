@@ -11,6 +11,7 @@ Read-only remote MCP gateway for [Agent Reach](https://github.com/Panniantong/Ag
 - `search_x`
 - `get_x_user_posts`
 - `get_x_post`
+- `post_x` (only when `AGENT_REACH_MCP_X_WRITE_ENABLED=true`)
 - `get_youtube_transcript`
 
 No shell, arbitrary CLI, write operations, credential retrieval, or unrestricted local-file access is exposed.
@@ -110,7 +111,9 @@ JWT signatures are checked through OIDC discovery/JWKS (or `AGENT_REACH_MCP_OAUT
 
 ## X
 
-The first implementation uses Agent Reach's `twitter-cli` path. The gateway invokes it with an argv array, `shell=False`, a timeout, JSON output and a response-size limit. Explicit Agent Reach Twitter credentials are injected only into that child process and are never returned to MCP clients.
+The primary X read path uses Agent Reach's `twitter-cli`. When `AGENT_REACH_MCP_X_TWIFORK_FALLBACK_ENABLED=true` (the default), read failures can fall back to Twifork using the same explicitly configured `auth_token` and `ct0` cookies. The gateway keeps twitter-cli as the primary backend and reports the backend that served each result.
+
+Optional X posting is deliberately off by default. Set `AGENT_REACH_MCP_X_WRITE_ENABLED=true` to expose `post_x`; each call must also pass `confirm=true`. The initial write path uses Twifork and supports a plain text post or reply. Do not enable write tools on a broadly shared or insufficiently authenticated MCP endpoint.
 
 Examples of underlying live checks before MCP testing:
 
@@ -131,7 +134,8 @@ The gateway also validates URLs/handles, rejects arbitrary commands, applies bac
 
 ## Current limitations
 
-- X automatic OpenCLI fallback is not implemented yet.
+- Twifork is a fallback for the current X read tools; it is not a full automatic backend router for every X operation.
+- X posting currently supports plain text posts/replies only; media upload and delete/like/repost actions are not exposed.
 - OAuth supports JWT access tokens; opaque-token introspection is not implemented yet.
 - Live backend availability depends on the user's Agent Reach setup.
 - ChatGPT custom-MCP access depends on the user's current ChatGPT plan/workspace policy.
