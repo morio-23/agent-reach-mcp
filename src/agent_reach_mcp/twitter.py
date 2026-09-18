@@ -146,7 +146,10 @@ class TwitterAdapter:
         )
 
     def _get_post_sync(self, post: str) -> ItemResult:
-        return _to_result(self._run(["tweet", post, "--json"]))
+        tweet_id = _tweet_id_from_ref(post)
+        return _to_single_result(
+            self._run(["tweet", post, "--json"]), expected_id=tweet_id
+        )
 
     def _run(self, args: list[str]) -> dict[str, Any]:
         executable = shutil.which("twitter")
@@ -334,6 +337,23 @@ def _to_result(payload: dict[str, Any]) -> ItemResult:
         source=SourceInfo(platform="x", backend="twitter-cli"),
         warnings=warnings,
     )
+
+
+def _to_single_result(payload: dict[str, Any], expected_id: str) -> ItemResult:
+    data = payload.get("data")
+    rows = (
+        [data]
+        if isinstance(data, dict)
+        else [x for x in data if isinstance(x, dict)]
+        if isinstance(data, list)
+        else []
+    )
+    match = next((row for row in rows if str(row.get("id")) == expected_id), None)
+    if match is None:
+        raise BackendExecutionError(
+            "twitter-cli response did not contain the requested post"
+        )
+    return _to_result({**payload, "data": match})
 
 
 def _twifork_result(

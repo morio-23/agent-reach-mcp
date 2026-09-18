@@ -6,6 +6,7 @@ from agent_reach_mcp.twitter import (
     _collect_twifork_pages,
     _normalize_tweet,
     _normalize_twifork_tweet,
+    _to_single_result,
     _tweet_id_from_ref,
     _validate_post_ref,
     _validate_username,
@@ -51,6 +52,20 @@ def test_normalize_twifork_tweet() -> None:
     assert item.author is not None
     assert item.author.username == "example2"
     assert item.metadata["metrics"]["views"] == 99
+
+
+def test_to_single_result_selects_requested_post() -> None:
+    result = _to_single_result(
+        {
+            "ok": True,
+            "data": [
+                {"id": "123", "text": "requested"},
+                {"id": "456", "text": "related"},
+            ],
+        },
+        expected_id="123",
+    )
+    assert [item.id for item in result.items] == ["123"]
 
 
 class FakePage:
