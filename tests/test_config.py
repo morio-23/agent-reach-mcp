@@ -9,15 +9,26 @@ def test_defaults_are_local_stdio() -> None:
     assert settings.transport is TransportMode.STDIO
     assert settings.auth_mode is AuthMode.NONE
     assert settings.host == "127.0.0.1"
+    assert settings.x_twifork_fallback_enabled is True
+    assert settings.x_write_enabled is False
 
 
 def test_none_auth_rejects_remote_http_by_default() -> None:
     with pytest.raises(ValidationError):
-        Settings(transport=TransportMode.STREAMABLE_HTTP, host="0.0.0.0", _env_file=None)
+        Settings(
+            transport=TransportMode.STREAMABLE_HTTP,
+            host="0.0.0.0",
+            _env_file=None,
+        )
 
 
 def test_none_auth_can_explicitly_allow_remote_http() -> None:
-    settings = Settings(transport=TransportMode.STREAMABLE_HTTP, host="0.0.0.0", allow_insecure_remote=True, _env_file=None)
+    settings = Settings(
+        transport=TransportMode.STREAMABLE_HTTP,
+        host="0.0.0.0",
+        allow_insecure_remote=True,
+        _env_file=None,
+    )
     assert settings.allow_insecure_remote is True
 
 
