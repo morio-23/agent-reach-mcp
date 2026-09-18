@@ -3,12 +3,17 @@ from types import SimpleNamespace
 import pytest
 
 from agent_reach_mcp.twitter import (
+    _ImageUpload,
     _collect_twifork_pages,
+    _create_tweet_with_media,
+    _detect_image_mime,
     _normalize_tweet,
     _normalize_twifork_tweet,
     _to_single_result,
     _tweet_id_from_ref,
+    _validate_media_inputs,
     _validate_post_ref,
+    _validate_public_image_url,
     _validate_username,
 )
 
@@ -66,6 +71,90 @@ def test_to_single_result_selects_requested_post() -> None:
         expected_id="123",
     )
     assert [item.id for item in result.items] == ["123"]
+
+
+class FakeTwiforkClient:
+    def __init__(self) -> None:
+        self.uploads: list[tuple[bytes, str]] = []
+        self.metadata: list[tuple[str, str]] = []
+        self.created: dict[str, object] | None = None
+
+    async def upload_media(self, data: bytes, media_type: str) -> str:
+        self.uploads.append((data, media_type))
+        return f"media-{len(self.uploads)}"
+
+    async def create_media_metadata(self, media_id: str, alt_text: str) -> None:
+        self.metadata.append((media_id, alt_text))
+
+    async def create_tweet(
+        self,
+        text: str,
+        media_ids: list[str] | None,
+        reply_to: str | None,
+    ) -> SimpleNamespace:
+        self.created = {
+            "text": text,
+            "media_ids": media_ids,
+            "reply_to": reply_to,
+        }
+        return SimpleNamespace(id="789", text=text, user=None)
+
+
+@pytest.mark.asyncio
+async def test_create_tweet_with_media_uploads_images_and_alt_text() -> None:
+    client = FakeTwiforkClient()
+    tweet = await _create_tweet_with_media(
+        client,
+        "hello",
+        "123",
+        [
+            _ImageUpload(b"png", "image/png", "first image"),
+            _ImageUpload(b"jpg", "image/jpeg", None),
+        ],
+    )
+    assert tweet.id == "789"
+    assert client.uploads == [
+        (b"png", "image/png"),
+        (b"jpg", "image/jpeg"),
+    ]
+    assert client.metadata == [("media-1", "first image")]
+    assert client.created == {
+        "text": "hello",
+        "media_ids": ["media-1", "media-2"],
+        "reply_to": "123",
+    }
+
+
+def test_media_input_validation() -> None:
+    urls, alt_texts = _validate_media_inputs(
+        ["https://images.example.com/one.png"],
+        ["description"],
+    )
+    assert urls == ["https://images.example.com/one.png"]
+    assert alt_texts == ["description"]
+    assert _validate_public_image_url("https://images.example.com/one.png").startswith(
+        "https://"
+    )
+    with pytest.raises(ValueError, match="HTTPS"):
+        _validate_public_image_url("http://images.example.com/one.png")
+    with pytest.raises(ValueError, match="same length"):
+        _validate_media_inputs(
+            ["https://images.example.com/one.png"],
+            [],
+        )
+    with pytest.raises(ValueError, match="at most 4"):
+        _validate_media_inputs(
+            [f"https://images.example.com/{i}.png" for i in range(5)],
+            None,
+        )
+
+
+def test_detect_image_mime() -> None:
+    assert _detect_image_mime(b"\x89PNG\r\n\x1a\nrest") == "image/png"
+    assert _detect_image_mime(b"\xff\xd8\xffrest") == "image/jpeg"
+    assert _detect_image_mime(b"RIFFxxxxWEBPrest") == "image/webp"
+    with pytest.raises(ValueError, match="PNG, JPEG, or WebP"):
+        _detect_image_mime(b"GIF89a")
 
 
 class FakePage:
