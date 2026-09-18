@@ -16,7 +16,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-x = ["twitter-cli>=0.8.5,<0.9"]
+x = [
+  "twitter-cli>=0.8.5,<0.9",
+  "twifork[impersonate]>=2.4.0,<3",
+]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.8", "mypy>=1.12"]
 
 [project.scripts]
