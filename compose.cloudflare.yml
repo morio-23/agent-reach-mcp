@@ -1,0 +1,24 @@
+# Optional overlay for a remotely managed Cloudflare Tunnel.
+# Usage: docker compose -f compose.private.yml -f compose.cloudflare.yml up -d
+# Requires a private .env with CLOUDFLARE_TUNNEL_TOKEN. Do not commit that file.
+# The Cloudflare published application's origin Service URL must be:
+#   http://agent-reach-mcp:8080
+# Windows continues using http://127.0.0.1:${AGENT_REACH_MCP_HOST_PORT:-8080}/mcp.
+#
+# IMPORTANT: Before publishing a hostname, protect it with a Cloudflare Access
+# application and Managed OAuth. A Tunnel alone does not authenticate requests.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in the local .env file}
+    depends_on:
+      agent-reach-mcp:
+        condition: service_started
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
