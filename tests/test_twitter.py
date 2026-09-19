@@ -243,7 +243,7 @@ def test_image_fetch_pins_validated_ip_and_preserves_signed_query(
             return None
 
         def read(self, maximum):
-            return b"\\x89PNG\\r\\n\\x1a\\nimage"
+            return b"\x89PNG\r\n\x1a\nimage"
 
     class FakeConnection:
         def __init__(self, host, port, pinned_ip, timeout):
@@ -268,7 +268,7 @@ def test_image_fetch_pins_validated_ip_and_preserves_signed_query(
     assert endpoints == [("images.example.com", 443, "93.184.216.34")]
     assert requested == ["/banner.png?token=secret-value"]
     assert mime == "image/png"
-    assert data.startswith(b"\\x89PNG")
+    assert data.startswith(b"\x89PNG")
 
 
 def test_pinned_https_socket_uses_numeric_ip_and_tls_hostname(
