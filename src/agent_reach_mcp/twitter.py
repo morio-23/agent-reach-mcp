@@ -1,13 +1,13 @@
 import asyncio
+import http.client
 import ipaddress
 import json
 import os
 import re
 import shutil
 import socket
+import ssl
 import subprocess
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Awaitable, Callable
@@ -386,61 +386,104 @@ def _validate_public_image_url(url: str) -> str:
 
 def _download_public_image(url: str) -> tuple[bytes, str]:
     current = _validate_public_image_url(url)
-    opener = urllib.request.build_opener(_NoRedirectHandler())
     for redirect_count in range(_MAX_REDIRECTS + 1):
-        _assert_public_dns(current)
-        request = urllib.request.Request(
-            current,
-            headers={
-                "Accept": "image/webp,image/png,image/jpeg,*/*;q=0.1",
-                "User-Agent": "agent-reach-mcp/0.1",
-            },
+        # Resolve and validate once, then connect to that exact IP. Connecting
+        # to the hostname again would leave a DNS-rebinding window open.
+        pinned_ip = _assert_public_dns(current)
+        parsed = urlparse(current)
+        connection = _PinnedHTTPSConnection(
+            parsed.hostname or "",
+            parsed.port or 443,
+            pinned_ip,
+            timeout=15,
         )
         try:
-            with opener.open(request, timeout=15) as response:
-                declared_length = response.headers.get("Content-Length")
-                declared_size: int | None = None
-                if declared_length:
-                    try:
-                        declared_size = int(declared_length)
-                    except ValueError:
-                        declared_size = None
-                if declared_size is not None and declared_size > _MAX_IMAGE_BYTES:
-                    raise ValueError(f"image exceeds {_MAX_IMAGE_BYTES} byte limit")
-                data = response.read(_MAX_IMAGE_BYTES + 1)
-        except urllib.error.HTTPError as exc:
-            if exc.code in {301, 302, 303, 307, 308}:
-                location = exc.headers.get("Location")
+            target = parsed.path or "/"
+            if parsed.query:
+                target += "?" + parsed.query
+            connection.request(
+                "GET",
+                target,
+                headers={
+                    "Accept": "image/webp,image/png,image/jpeg,*/*;q=0.1",
+                    "User-Agent": "agent-reach-mcp/0.1",
+                },
+            )
+            response = connection.getresponse()
+            if response.status in {301, 302, 303, 307, 308}:
+                location = response.getheader("Location")
                 if not location:
                     raise BackendExecutionError(
                         "image download redirect did not include a Location header"
-                    ) from None
+                    )
                 if redirect_count >= _MAX_REDIRECTS:
-                    raise BackendExecutionError(
-                        "image download exceeded redirect limit"
-                    ) from None
+                    raise BackendExecutionError("image download exceeded redirect limit")
                 current = _validate_public_image_url(urljoin(current, location))
                 continue
-            raise BackendExecutionError(
-                f"image download failed with HTTP {exc.code}"
-            ) from None
-        except OSError:
+            if response.status != 200:
+                raise BackendExecutionError(
+                    f"image download failed with HTTP {response.status}"
+                )
+            declared_length = response.getheader("Content-Length")
+            if declared_length:
+                try:
+                    declared_size = int(declared_length)
+                except ValueError:
+                    declared_size = None
+                if declared_size is not None and declared_size > _MAX_IMAGE_BYTES:
+                    raise ValueError(f"image exceeds {_MAX_IMAGE_BYTES} byte limit")
+            data = response.read(_MAX_IMAGE_BYTES + 1)
+        except (OSError, http.client.HTTPException, ssl.SSLError):
+            # Lower-level exceptions may contain a signed media URL/token.
             raise BackendExecutionError("image download failed") from None
+        finally:
+            connection.close()
 
         if len(data) > _MAX_IMAGE_BYTES:
             raise ValueError(f"image exceeds {_MAX_IMAGE_BYTES} byte limit")
-        media_type = _detect_image_mime(data)
-        return data, media_type
+        return data, _detect_image_mime(data)
 
     raise BackendExecutionError("image download exceeded redirect limit")
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect to a validated numeric address while verifying TLS for the URL host."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        pinned_ip: str,
+        timeout: float,
+    ) -> None:
+        super().__init__(
+            host,
+            port=port,
+            timeout=timeout,
+            context=ssl.create_default_context(),
+        )
+        self._pinned_ip = pinned_ip
+
+    def connect(self) -> None:
+        # Only the numeric IP is passed to the socket layer. The original URL
+        # hostname remains self.host for TLS SNI, certificate verification and
+        # the HTTP Host header.
+        raw_socket = socket.create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        try:
+            self.sock = self._context.wrap_socket(
+                raw_socket,
+                server_hostname=self.host,
+            )
+        except BaseException:
+            raw_socket.close()
+            raise
 
 
-def _assert_public_dns(url: str) -> None:
+def _assert_public_dns(url: str) -> str:
     parsed = urlparse(url)
     host = parsed.hostname
     if not host:
@@ -451,16 +494,14 @@ def _assert_public_dns(url: str) -> None:
             parsed.port or 443,
             type=socket.SOCK_STREAM,
         )
-    except socket.gaierror as exc:
-        raise BackendExecutionError(
-            f"image hostname could not be resolved: {host}"
-        ) from exc
+    except socket.gaierror:
+        raise BackendExecutionError("image hostname could not be resolved") from None
     if not addresses:
-        raise BackendExecutionError(f"image hostname could not be resolved: {host}")
-    for address in addresses:
-        ip = ipaddress.ip_address(address[4][0])
-        if not ip.is_global:
-            raise ValueError("media URL must resolve only to public IP addresses")
+        raise BackendExecutionError("image hostname could not be resolved")
+    resolved_ips = [ipaddress.ip_address(address[4][0]) for address in addresses]
+    if not all(ip.is_global for ip in resolved_ips):
+        raise ValueError("media URL must resolve only to public IP addresses")
+    return str(resolved_ips[0])
 
 
 def _detect_image_mime(data: bytes) -> str:
