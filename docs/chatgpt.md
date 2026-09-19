@@ -63,6 +63,17 @@ The authorization server is external. `agent-reach-mcp` validates JWT access tok
 
 For long-lived ChatGPT connections, configure the external OAuth/OIDC provider to support refresh tokens / offline access as required by the provider and ChatGPT.
 
+### 3. Cloudflare Tunnel + Access Managed OAuth (Docker)
+
+For the existing Windows/Docker Desktop deployment, use the **optional**
+[Cloudflare Tunnel guide](cloudflare-tunnel.md) instead of exposing the local
+port. This is a separate authentication boundary: a restricted Cloudflare
+Access application performs the client's interactive OAuth flow at the edge,
+while the private MCP origin retains `AUTH_MODE=none`. Do not set up a public
+route before Access is enabled, and do not enable write tools in this setup.
+The MCP origin does not yet validate Cloudflare Access JWT assertion headers;
+see the guide for the security limitations.
+
 ## Static token mode
 
 `static_token` remains supported for generic MCP clients and private integrations:
