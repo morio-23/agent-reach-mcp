@@ -63,10 +63,22 @@ async def test_server_exposes_post_x_only_when_enabled() -> None:
         assert "post_x" in names
         result = await client.call_tool(
             "post_x",
-            {"text": "hello", "confirm": True, "reply_to": "123"},
+            {
+                "text": "hello",
+                "confirm": True,
+                "reply_to": "123",
+                "media_urls": ["https://images.example.com/one.png"],
+                "media_alt_texts": ["sample image"],
+            },
         )
         assert not result.is_error
         assert result.structured_content == {
             "items": [],
-            "args": ["hello", True, "123"],
+            "args": [
+                "hello",
+                True,
+                "123",
+                ["https://images.example.com/one.png"],
+                ["sample image"],
+            ],
         }

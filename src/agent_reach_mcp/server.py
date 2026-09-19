@@ -67,10 +67,21 @@ def create_mcp(
 
         @mcp.tool(structured_output=True)
         async def post_x(
-            text: str, confirm: bool = False, reply_to: str | None = None
+            text: str,
+            confirm: bool = False,
+            reply_to: str | None = None,
+            media_urls: list[str] | None = None,
+            media_alt_texts: list[str] | None = None,
         ) -> dict[str, Any]:
-            """Create an X post or reply through Twifork. The caller must explicitly set confirm=true."""
-            return await _safe_call(gateway.post_x, text, confirm, reply_to)
+            """Create an X post/reply through Twifork, optionally with 1-4 public HTTPS images. The caller must explicitly set confirm=true."""
+            return await _safe_call(
+                gateway.post_x,
+                text,
+                confirm,
+                reply_to,
+                media_urls,
+                media_alt_texts,
+            )
 
     @mcp.tool(structured_output=True)
     async def get_youtube_transcript(

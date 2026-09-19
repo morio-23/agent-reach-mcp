@@ -1,14 +1,25 @@
+import socket
 from types import SimpleNamespace
 
 import pytest
 
+import agent_reach_mcp.twitter as twitter_module
+from agent_reach_mcp.errors import BackendExecutionError
 from agent_reach_mcp.twitter import (
+    TwitterAdapter,
+    _assert_public_dns,
     _collect_twifork_pages,
+    _create_tweet_with_media,
+    _detect_image_mime,
+    _download_public_image,
+    _ImageUpload,
     _normalize_tweet,
     _normalize_twifork_tweet,
     _to_single_result,
     _tweet_id_from_ref,
+    _validate_media_inputs,
     _validate_post_ref,
+    _validate_public_image_url,
     _validate_username,
 )
 
@@ -66,6 +77,258 @@ def test_to_single_result_selects_requested_post() -> None:
         expected_id="123",
     )
     assert [item.id for item in result.items] == ["123"]
+
+
+class FakeTwiforkClient:
+    def __init__(self) -> None:
+        self.uploads: list[tuple[bytes, str]] = []
+        self.metadata: list[tuple[str, str]] = []
+        self.created: dict[str, object] | None = None
+
+    async def upload_media(self, data: bytes, media_type: str) -> str:
+        self.uploads.append((data, media_type))
+        return f"media-{len(self.uploads)}"
+
+    async def create_media_metadata(self, media_id: str, alt_text: str) -> None:
+        self.metadata.append((media_id, alt_text))
+
+    async def create_tweet(
+        self,
+        text: str,
+        media_ids: list[str] | None,
+        reply_to: str | None,
+    ) -> SimpleNamespace:
+        self.created = {
+            "text": text,
+            "media_ids": media_ids,
+            "reply_to": reply_to,
+        }
+        return SimpleNamespace(id="789", text=text, user=None)
+
+
+@pytest.mark.asyncio
+async def test_post_requires_confirmation_before_fetching_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = TwitterAdapter(
+        SimpleNamespace(),
+        timeout_seconds=1,
+        max_output_bytes=1024,
+        write_enabled=True,
+    )
+
+    def fail_if_called(url: str) -> tuple[bytes, str]:
+        raise AssertionError(f"media fetch should not run: {url}")
+
+    monkeypatch.setattr(twitter_module, "_download_public_image", fail_if_called)
+    with pytest.raises(ValueError, match="confirm=true"):
+        await adapter.post(
+            "hello",
+            confirm=False,
+            media_urls=["https://images.example.com/one.png"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_tweet_with_media_uploads_images_and_alt_text() -> None:
+    client = FakeTwiforkClient()
+    tweet = await _create_tweet_with_media(
+        client,
+        "hello",
+        "123",
+        [
+            _ImageUpload(b"png", "image/png", "first image"),
+            _ImageUpload(b"jpg", "image/jpeg", None),
+        ],
+    )
+    assert tweet.id == "789"
+    assert client.uploads == [
+        (b"png", "image/png"),
+        (b"jpg", "image/jpeg"),
+    ]
+    assert client.metadata == [("media-1", "first image")]
+    assert client.created == {
+        "text": "hello",
+        "media_ids": ["media-1", "media-2"],
+        "reply_to": "123",
+    }
+
+
+def test_media_input_validation() -> None:
+    urls, alt_texts = _validate_media_inputs(
+        ["https://images.example.com/one.png"],
+        ["description"],
+    )
+    assert urls == ["https://images.example.com/one.png"]
+    assert alt_texts == ["description"]
+    assert _validate_public_image_url("https://images.example.com/one.png").startswith(
+        "https://"
+    )
+    with pytest.raises(ValueError, match="HTTPS"):
+        _validate_public_image_url("http://images.example.com/one.png")
+    with pytest.raises(ValueError, match="same length"):
+        _validate_media_inputs(
+            ["https://images.example.com/one.png"],
+            [],
+        )
+    with pytest.raises(ValueError, match="at most 4"):
+        _validate_media_inputs(
+            [f"https://images.example.com/{i}.png" for i in range(5)],
+            None,
+        )
+
+
+def test_public_dns_rejects_private_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        twitter_module.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
+        ],
+    )
+    with pytest.raises(ValueError, match="public IP"):
+        _assert_public_dns("https://images.example.com/one.png")
+
+
+def test_detect_image_mime() -> None:
+    assert _detect_image_mime(b"\x89PNG\r\n\x1a\nrest") == "image/png"
+    assert _detect_image_mime(b"\xff\xd8\xffrest") == "image/jpeg"
+    assert _detect_image_mime(b"RIFFxxxxWEBPrest") == "image/webp"
+    with pytest.raises(ValueError, match="PNG, JPEG, or WebP"):
+        _detect_image_mime(b"GIF89a")
+
+
+def test_download_error_does_not_expose_url_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "TOPSECRET_QUERY_VALUE"
+
+    class FailingConnection:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def request(self, method, target, headers):
+            raise OSError(
+                f"failed URL https://images.example.com/a.png?token={secret}"
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        twitter_module,
+        "_assert_public_dns",
+        lambda url: "93.184.216.34",
+    )
+    monkeypatch.setattr(
+        twitter_module, "_PinnedHTTPSConnection", FailingConnection
+    )
+    with pytest.raises(BackendExecutionError) as exc_info:
+        _download_public_image(
+            f"https://images.example.com/a.png?token={secret}"
+        )
+    assert secret not in str(exc_info.value)
+
+
+def test_image_fetch_pins_validated_ip_and_preserves_signed_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints: list[tuple[str, int, str]] = []
+    requested: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def getheader(self, name):
+            return None
+
+        def read(self, maximum):
+            return b"\x89PNG\r\n\x1a\nimage"
+
+    class FakeConnection:
+        def __init__(self, host, port, pinned_ip, timeout):
+            endpoints.append((host, port, pinned_ip))
+
+        def request(self, method, target, headers):
+            requested.append(target)
+
+        def getresponse(self):
+            return FakeResponse()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        twitter_module, "_assert_public_dns", lambda url: "93.184.216.34"
+    )
+    monkeypatch.setattr(twitter_module, "_PinnedHTTPSConnection", FakeConnection)
+    data, mime = _download_public_image(
+        "https://images.example.com/banner.png?token=secret-value"
+    )
+    assert endpoints == [("images.example.com", 443, "93.184.216.34")]
+    assert requested == ["/banner.png?token=secret-value"]
+    assert mime == "image/png"
+    assert data.startswith(b"\x89PNG")
+
+
+def test_pinned_https_socket_uses_numeric_ip_and_tls_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destinations: list[tuple[str, int]] = []
+    server_names: list[str] = []
+    raw_socket = SimpleNamespace(close=lambda: None)
+
+    def fake_create_connection(address, timeout, source_address):
+        destinations.append(address)
+        return raw_socket
+
+    class FakeContext:
+        def wrap_socket(self, sock, server_hostname):
+            assert sock is raw_socket
+            server_names.append(server_hostname)
+            return sock
+
+    monkeypatch.setattr(twitter_module.socket, "create_connection", fake_create_connection)
+    connection = twitter_module._PinnedHTTPSConnection(
+        "images.example.com", 443, "93.184.216.34", timeout=15
+    )
+    connection._context = FakeContext()
+    connection.connect()
+    assert destinations == [("93.184.216.34", 443)]
+    assert server_names == ["images.example.com"]
+
+
+def test_image_redirect_to_private_address_never_connects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempted: list[str] = []
+
+    class RedirectResponse:
+        status = 302
+
+        def getheader(self, name):
+            return "https://127.0.0.1/private.png"
+
+    class RedirectConnection:
+        def __init__(self, host, port, pinned_ip, timeout):
+            attempted.append(host)
+
+        def request(self, method, target, headers):
+            pass
+
+        def getresponse(self):
+            return RedirectResponse()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        twitter_module, "_assert_public_dns", lambda url: "93.184.216.34"
+    )
+    monkeypatch.setattr(twitter_module, "_PinnedHTTPSConnection", RedirectConnection)
+    with pytest.raises(ValueError, match="public"):
+        _download_public_image("https://images.example.com/one.png")
+    assert attempted == ["images.example.com"]
 
 
 class FakePage:

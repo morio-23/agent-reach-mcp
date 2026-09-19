@@ -111,9 +111,22 @@ class Gateway:
         return (await self._twitter.get_post(post)).model_dump(mode="json")
 
     async def post_x(
-        self, text: str, confirm: bool = False, reply_to: str | None = None
+        self,
+        text: str,
+        confirm: bool = False,
+        reply_to: str | None = None,
+        media_urls: list[str] | None = None,
+        media_alt_texts: list[str] | None = None,
     ) -> dict[str, Any]:
-        return (await self._twitter.post(text, confirm, reply_to)).model_dump(mode="json")
+        return (
+            await self._twitter.post(
+                text,
+                confirm,
+                reply_to,
+                media_urls,
+                media_alt_texts,
+            )
+        ).model_dump(mode="json")
 
     async def get_youtube_transcript(
         self, url: str, languages: list[str] | None = None
