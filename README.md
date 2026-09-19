@@ -79,6 +79,20 @@ docker compose -f compose.private.yml run --rm --entrypoint agent-reach \
 
 Never commit or copy the resulting Agent Reach configuration into the image.
 
+### Cloudflare Tunnel (opt-in)
+
+For a domain managed by Cloudflare, an optional `compose.cloudflare.yml` sidecar
+connects to the existing private Docker deployment without changing the
+Windows loopback host-port mapping. Configure a restricted Cloudflare Access
+application with Managed OAuth **before** publishing the hostname; a Tunnel
+alone does not authenticate MCP requests. Keep X posting disabled on this
+edge-protected setup. The MCP origin does not yet validate Cloudflare Access
+JWT assertion headers, so see the documented security limitations.
+
+See [Cloudflare Tunnel deployment](docs/cloudflare-tunnel.md) for the Windows
+8085 example, Docker service URL (`http://agent-reach-mcp:8080`), local token
+configuration, Cloudflare dashboard steps and verification commands.
+
 ## ChatGPT
 
 ChatGPT connects to a remote MCP endpoint rather than directly to local stdio. For a private/home-server deployment, prefer loopback `Streamable HTTP` behind OpenAI Secure MCP Tunnel. For a public HTTPS deployment, use OAuth/OIDC.
