@@ -6,6 +6,7 @@ posting; a write workflow requires a distinct, audited approval implementation.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import hmac
 import json
 import os
@@ -62,10 +63,15 @@ class ConsoleStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         db = sqlite3.connect(self.database, timeout=10)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def sources(self) -> list[dict[str, Any]]:
         with self.lock, self._connect() as db:
@@ -318,6 +324,7 @@ def main() -> None:
     port = int(os.environ.get("AGENT_REACH_CONSOLE_PORT", "8090"))
     if not 1 <= port <= 65535:
         raise SystemExit("invalid console port")
+    os.umask(0o077)
     state_dir = Path(os.environ.get("AGENT_REACH_CONSOLE_STATE_DIR",
                                    "/home/appuser/.agent-reach"))
     gateway = Gateway(Settings(x_write_enabled=False))
