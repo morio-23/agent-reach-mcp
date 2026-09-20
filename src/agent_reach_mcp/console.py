@@ -257,9 +257,16 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if path == "/api/sources":
             self._response(200, {"sources": self.server.store.sources()})
         elif path == "/api/items":
-            self._response(200, {"items": self.server.store.library.items(
-                state=self._query_arg("state"), collection=self._query_arg("collection"),
-                query=self._query_arg("q"))})
+            try:
+                items = self.server.store.library.items(
+                    state=self._query_arg("state"),
+                    collection=self._query_arg("collection"),
+                    query=self._query_arg("q"),
+                )
+            except ValueError as exc:
+                self._response(400, {"error": str(exc)})
+                return
+            self._response(200, {"items": items})
         elif path == "/api/collections":
             self._response(200, {"collections": self.server.store.library.collections()})
         elif path == "/api/findings":
