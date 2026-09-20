@@ -76,6 +76,25 @@ class LibraryStore:
                   collection_name TEXT NOT NULL REFERENCES library_collections(name) ON DELETE CASCADE,
                   PRIMARY KEY(item_id,collection_name)
                 );
+                CREATE TABLE IF NOT EXISTS item_changes(
+                  item_id TEXT PRIMARY KEY REFERENCES library_items(item_id) ON DELETE CASCADE,
+                  kind TEXT NOT NULL CHECK(kind IN ('new','updated','existing')),
+                  changed_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS item_revisions(
+                  revision_id INTEGER PRIMARY KEY,
+                  item_id TEXT NOT NULL REFERENCES library_items(item_id) ON DELETE CASCADE,
+                  old_content TEXT NOT NULL, new_content TEXT NOT NULL,
+                  changed_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS source_runs(
+                  id INTEGER PRIMARY KEY, source_id INTEGER, source_label TEXT NOT NULL,
+                  kind TEXT NOT NULL, started_at TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK(status IN ('success','failed')),
+                  fetched INTEGER NOT NULL DEFAULT 0, new_count INTEGER NOT NULL DEFAULT 0,
+                  updated_count INTEGER NOT NULL DEFAULT 0, backend TEXT NOT NULL DEFAULT '',
+                  message TEXT NOT NULL DEFAULT ''
+                );
                 CREATE TABLE IF NOT EXISTS console_schema_migrations(
                   name TEXT PRIMARY KEY, migrated_at TEXT NOT NULL
                 );
@@ -111,6 +130,11 @@ class LibraryStore:
                     "INSERT INTO console_schema_migrations VALUES(?,?)",
                     ("generic_v1", _now()),
                 )
+            # Pre-upgrade records are not incorrectly advertised as newly fetched.
+            db.execute(
+                """INSERT OR IGNORE INTO item_changes(item_id,kind,changed_at)
+                SELECT item_id,'existing',captured_at FROM library_items"""
+            )
 
     @contextmanager
     def _connect(self):
@@ -177,6 +201,7 @@ class LibraryStore:
         if not isinstance(rows, list) or len(rows) > 100:
             raise ValueError("invalid item count")
         inserted = 0
+        updated = 0
         with self.lock, self._connect() as db:
             for item in rows:
                 if not isinstance(item, dict):
@@ -188,22 +213,55 @@ class LibraryStore:
                 author = item.get("author") or {}
                 if not isinstance(author, dict):
                     author = {}
-                cursor = db.execute(
-                    """INSERT OR IGNORE INTO library_items(
-                      item_id,platform,external_id,item_type,title,content,url,
-                      author,published_at,captured_at,backend)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                    (item_id, platform, external_id,
-                     str(item.get("type") or "document")[:50],
-                     str(item.get("title") or "")[:500],
-                     str(item.get("content") or "")[:100000],
-                     str(item.get("url") or "")[:1500],
-                     str(author.get("username") or author.get("display_name") or "")[:100],
-                     str(item.get("published_at") or "")[:64], _now(), backend),
-                )
-                inserted += cursor.rowcount
-        return {"fetched": len(rows), "new": inserted, "backend": backend,
-                "warnings": result.get("warnings") or []}
+                content = str(item.get("content") or "")[:100000]
+                title = str(item.get("title") or "")[:500]
+                url = str(item.get("url") or "")[:1500]
+                author_name = str(author.get("username") or author.get("display_name") or "")[:100]
+                published_at = str(item.get("published_at") or "")[:64]
+                existing = db.execute(
+                    "SELECT content,title,url,author,published_at FROM library_items WHERE item_id=?",
+                    (item_id,),
+                ).fetchone()
+                if existing is None:
+                    db.execute(
+                        """INSERT INTO library_items(
+                          item_id,platform,external_id,item_type,title,content,url,
+                          author,published_at,captured_at,backend)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        (item_id, platform, external_id,
+                         str(item.get("type") or "document")[:50], title, content,
+                         url, author_name, published_at, _now(), backend),
+                    )
+                    db.execute(
+                        "INSERT INTO item_changes(item_id,kind,changed_at) VALUES(?,?,?)",
+                        (item_id, "new", _now()),
+                    )
+                    inserted += 1
+                    continue
+                # Compare captured source text, not review metadata or fetch time.
+                # An unchanged refetch must never reset the user's review.
+                if existing["content"] != content:
+                    now = _now()
+                    db.execute(
+                        """INSERT INTO item_revisions(item_id,old_content,new_content,changed_at)
+                        VALUES(?,?,?,?)""",
+                        (item_id, existing["content"], content, now),
+                    )
+                    db.execute(
+                        """UPDATE library_items SET content=?,title=?,url=?,author=?,
+                        published_at=?,backend=? WHERE item_id=?""",
+                        (content, title, url, author_name, published_at, backend, item_id),
+                    )
+                    db.execute(
+                        """INSERT INTO item_changes(item_id,kind,changed_at,version)
+                        VALUES(?,?,?,2) ON CONFLICT(item_id) DO UPDATE SET
+                        kind='updated',changed_at=excluded.changed_at,
+                        version=item_changes.version+1""",
+                        (item_id, "updated", now),
+                    )
+                    updated += 1
+        return {"fetched": len(rows), "new": inserted, "updated": updated,
+                "backend": backend, "warnings": result.get("warnings") or []}
 
     def ingest_web(self, result: dict[str, Any]) -> dict[str, Any]:
         url = _web_url(str(result.get("url") or ""))
@@ -219,9 +277,11 @@ class LibraryStore:
         }
         return self.ingest(payload)
 
-    def items(self, *, state: str = "", collection: str = "", query: str = "") -> list[dict[str, Any]]:
+    def items(self, *, state: str = "", collection: str = "", query: str = "", change: str = "") -> list[dict[str, Any]]:
         if state and state not in _STATES:
             raise ValueError("invalid state")
+        if change and change not in {"new", "updated"}:
+            raise ValueError("invalid change filter")
         if len(collection) > 80 or len(query) > 200:
             raise ValueError("filter is too long")
         conditions = []
@@ -229,6 +289,9 @@ class LibraryStore:
         if state:
             conditions.append("i.state=?")
             params.append(state)
+        if change:
+            conditions.append("ch.kind=?")
+            params.append(change)
         if collection:
             conditions.append("EXISTS(SELECT 1 FROM library_memberships m WHERE m.item_id=i.item_id AND m.collection_name=?)")
             params.append(collection)
@@ -238,7 +301,9 @@ class LibraryStore:
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         with self.lock, self._connect() as db:
             rows = db.execute(
-                "SELECT i.* FROM library_items i" + where +
+                "SELECT i.*,COALESCE(ch.kind,'existing') AS change_kind,"
+                "COALESCE(ch.version,1) AS version FROM library_items i "
+                "LEFT JOIN item_changes ch ON ch.item_id=i.item_id" + where +
                 " ORDER BY i.captured_at DESC LIMIT 300", params
             ).fetchall()
             return [
@@ -298,3 +363,35 @@ class LibraryStore:
                 "INSERT INTO library_memberships(item_id,collection_name) VALUES(?,?)",
                 [(item_id, name) for name in collections],
             )
+
+    def revisions(self, item_id: str) -> list[dict[str, Any]]:
+        if not isinstance(item_id, str) or not 1 <= len(item_id) <= 340:
+            raise ValueError("invalid item id")
+        with self.lock, self._connect() as db:
+            return [dict(row) for row in db.execute(
+                """SELECT revision_id,changed_at,old_content,new_content FROM item_revisions
+                WHERE item_id=? ORDER BY revision_id DESC LIMIT 10""", (item_id,)
+            )]
+
+    def record_run(self, source: dict[str, Any], *, status: str, summary: dict[str, Any] | None = None) -> None:
+        if status not in {"success", "failed"}:
+            raise ValueError("invalid run status")
+        summary = summary or {}
+        with self.lock, self._connect() as db:
+            db.execute(
+                """INSERT INTO source_runs(
+                  source_id,source_label,kind,started_at,status,fetched,new_count,
+                  updated_count,backend,message) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (source["id"], (source.get("label") or source["value"])[:150],
+                 source["kind"], _now(), status, summary.get("fetched", 0),
+                 summary.get("new", 0), summary.get("updated", 0),
+                 summary.get("backend", ""), str(summary.get("message", ""))[:200]),
+            )
+
+    def runs(self) -> list[dict[str, Any]]:
+        with self.lock, self._connect() as db:
+            return [dict(row) for row in db.execute(
+                """SELECT source_id,source_label,kind,started_at,status,fetched,
+                new_count,updated_count,backend,message FROM source_runs
+                ORDER BY id DESC LIMIT 50"""
+            )]
