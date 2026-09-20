@@ -101,8 +101,20 @@ without tying it to OshiCalendar. The Web URL is verified by the existing
 Gateway.read_url path before it is fetched; do not interpret this console as a
 general network proxy.
 
-For this MVP, investigation is manually triggered for one source at a time,
-and the latest 300 matching items are displayed. The Web source represents a
-single page (not a domain crawl or RSS polling). Workflow-specific extraction,
-revision tracking, batch research, scheduling and export adapters can be added
-without changing stored source records.
+For this MVP, investigation is manually triggered for one source or a
+bounded batch of **1–5 selected sources** (sequentially; max 10 posts per X
+source). Failure of one source is shown in the per-source results and the
+remaining sources continue; backend exception details are not sent to the
+browser. The 50 most recent run outcomes are retained (10 shown on screen).
+The latest 300 matching library items are returned, with 20 rendered at a
+time. A Web source represents a single page, not a domain crawl or RSS poll.
+
+The library marks a freshly ingested item as `new`; when its captured body
+changes, the previous and new bodies are saved as a revision and it is marked
+`updated`. An unchanged refetch does not reset the review, tags, collections
+or notes. These change labels represent **the most recent detected content
+change**, not "new since the last UI visit", and pre-upgrade records are
+initially marked `existing`. Revision display is intentionally capped; large
+pages may still need a more specialized text-diff UI later. Changes to X post
+metadata alone are not treated as body updates. Scheduling, paginated backend
+fetching, workflow-specific extraction and export adapters are future work.
