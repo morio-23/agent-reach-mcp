@@ -83,13 +83,31 @@ async function loadFindings() {
   const root = el("findings");
   root.replaceChildren();
   if (!items.length) root.append(node("p", "muted", "一致するデータがありません。収集元を登録して調査するか、フィルターを変更してください。"));
-  for (const item of items) {
+  // Render a small batch first to keep long research pages responsive.
+  let visible = 0;
+  const appendBatch = () => {
+  for (const item of items.slice(visible, visible + 20)) {
     const card = node("article", "finding");
     const title = node("div", "horizontal");
     const author = node("strong", "", (item.platform === "x" ? "@" : "") + (item.author || item.title || item.url || "unknown"));
     const date = node("span", "muted", item.published_at || item.captured_at || "日時不明");
     title.append(author, date);
-    const body = node("p", "content", item.content);
+    const fullText = item.content || "";
+    const previewLimit = item.platform === "web" ? 360 : 600;
+    const body = node("p", "content", fullText.length > previewLimit ?
+      fullText.slice(0, previewLimit) + "…" : fullText);
+    let expand = null;
+    if (fullText.length > previewLimit) {
+      expand = node("button", "secondary expand", "本文をすべて表示");
+      let expanded = false;
+      expand.onclick = () => {
+        expanded = !expanded;
+        body.textContent = expanded ? fullText : fullText.slice(0, previewLimit) + "…";
+        expand.textContent = expanded ? "本文を折りたたむ" : "本文をすべて表示";
+        expand.setAttribute("aria-expanded", String(expanded));
+      };
+      expand.setAttribute("aria-expanded", "false");
+    }
     const link = node("a", "", "元の情報を開く ↗");
     try {
       const url = new URL(item.url);
@@ -132,10 +150,24 @@ async function loadFindings() {
     reviewRow.append(review, save);
     const origin = node("p", "muted", "プラットフォーム：" + item.platform + " / バックエンド：" +
       (item.backend || "不明") + " / ID：" + item.external_id);
-    card.append(title, body, link, origin, reviewRow, tagsLabel, tags,
+    card.append(title, body);
+    if (expand) card.append(expand);
+    card.append(link, origin, reviewRow, tagsLabel, tags,
       collectionsLabel, collections, notesLabel, notes);
     root.append(card);
   }
+  visible = Math.min(items.length, visible + 20);
+  if (visible < items.length) {
+    more.textContent = "さらに20件表示（残り" + (items.length - visible) + "件）";
+    root.append(more);
+  }
+  };
+  const more = node("button", "secondary load-more", "さらに20件表示");
+  more.onclick = () => {
+    more.remove();
+    appendBatch();
+  };
+  appendBatch();
 }
 el("connect").onclick = async () => {
   const entered = el("token").value;
