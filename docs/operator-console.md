@@ -1,0 +1,83 @@
+# Local operator console (MVP)
+
+The console is a **separate, local-only** screen for using AgentReach without
+requiring ChatGPT to execute MCP tools. It registers X usernames or search
+queries, fetches results through the existing twitter-cli / Twifork adapter,
+deduplicates results by post ID, and stores review classifications and notes.
+
+**Scope in this PR:** source registration/removal, manual investigation,
+backend/warning display, review of event/product/deadline findings, durable
+results. **Not in this PR:** X posting, posting drafts, automated posting,
+scheduled collection, or OshiCalendar registration. Nothing is sent to X
+except read requests. The existing MCP deployment remains read-only.
+
+## Deploy on Windows / Docker Desktop
+
+Make sure your existing MCP and Cloudflare Tunnel still run as before. The
+console uses a **separate loopback-only port**, does not change the MCP's
+`/mcp` route, and does not become a Cloudflare published hostname.
+
+1. Update the local `main` branch. In a terminal in the repository root,
+   generate an independent random dashboard access token:
+
+   ```powershell
+   $consoleKey = [Convert]::ToHexString([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+   ```
+
+2. Add the following to the existing Git-ignored `.env` file **locally**
+   (replace the example token with `$consoleKey`; don't paste it into chat):
+
+   ```dotenv
+   AGENT_REACH_MCP_HOST_PORT=8085
+   AGENT_REACH_CONSOLE_HOST_PORT=8090
+   AGENT_REACH_CONSOLE_ACCESS_TOKEN=your-own-random-64-hex-character-key
+   ```
+
+   Preserve `CLOUDFLARE_TUNNEL_TOKEN` and existing settings. The console
+   access key is distinct from the Tunnel token and X cookies.
+
+3. Start **only** the new service, leaving the running MCP and tunnel alone:
+
+   ```powershell
+   docker compose -f compose.private.yml -f compose.console.yml up -d --build agent-reach-console
+   docker compose -f compose.private.yml -f compose.console.yml ps
+   docker compose -f compose.private.yml -f compose.console.yml logs --tail=30 agent-reach-console
+   ```
+
+4. Open **http://127.0.0.1:8090/** on this Windows PC. Enter the access
+   token from your local `.env`. The page does not store the token in browser
+   storage or cookies; it stays in memory until the page closes or reloads.
+
+5. Register `LoveLive_staff` as a username or `ラブライブ` as a search
+   query. Click `調査する`, then classify findings and save review notes.
+
+The console uses the same persisted `agent-reach-data` volume as MCP for
+AgentReach's manually configured X credentials; it stores its own SQLite DB at
+`/home/appuser/.agent-reach/console.sqlite3`. It never copies credentials to
+the UI. Removing the console service does not remove existing source or
+review data, unless you explicitly delete the volume. **Do not run
+`docker compose down -v`**.
+
+The console is published only to `127.0.0.1` on the Windows host. Its API
+requires a separate high-entropy console token and checks the request host
+and origin. Do not add `agent-reach-console:8090` to any Cloudflare Tunnel
+published route. Do not open port 8090 through a firewall or router. This is
+not a multi-user, internet-exposed administration UI.
+
+## Verify without CI
+
+```powershell
+pytest -q
+ruff check .
+python scripts/local_verify.py
+docker compose -f compose.private.yml -f compose.console.yml config --quiet
+python scripts/http_verify.py --url http://127.0.0.1:8085/mcp
+```
+
+Then from the local console test username registration, X investigation,
+review persistence after reload, and backend fallback. Check that the
+published ChatGPT MCP continues exposing **six read-only tools** and that
+`https://mcp.morio-23.net/mcp` remains protected by Cloudflare Access.
+
+This is a manually triggered console: it deliberately does not scrape X
+periodically, retry failed posting, or publish calendar events.
