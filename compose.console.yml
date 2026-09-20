@@ -1,0 +1,25 @@
+# Optional local-only operator UI. Never add this service to the Cloudflare
+# published routes; it is for the Windows desktop operator only.
+# Requires a random access token in the local, Git-ignored .env:
+# AGENT_REACH_CONSOLE_ACCESS_TOKEN=<64 hex characters>
+# Run with:
+# docker compose -f compose.private.yml -f compose.console.yml up -d --build
+services:
+  agent-reach-console:
+    build: .
+    entrypoint: ["python", "-m", "agent_reach_mcp.console"]
+    restart: unless-stopped
+    environment:
+      AGENT_REACH_CONSOLE_ACCESS_TOKEN: ${AGENT_REACH_CONSOLE_ACCESS_TOKEN:?Set a random console access token in local .env}
+      AGENT_REACH_CONSOLE_PORT: "8090"
+      AGENT_REACH_CONSOLE_STATE_DIR: /home/appuser/.agent-reach
+      AGENT_REACH_MCP_X_WRITE_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${AGENT_REACH_CONSOLE_HOST_PORT:-8090}:8090"
+    volumes:
+      - agent-reach-data:/home/appuser/.agent-reach
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
