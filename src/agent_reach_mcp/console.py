@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from .config import Settings, TransportMode
 from .gateway import Gateway
+from .library import LibraryStore
 
 _USERNAME = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 _KINDS = {"event", "product", "deadline", "other"}
@@ -62,6 +63,7 @@ class ConsoleStore:
                 );
                 """
             )
+        self.library = LibraryStore(database)
 
     @contextmanager
     def _connect(self):
@@ -74,43 +76,16 @@ class ConsoleStore:
             db.close()
 
     def sources(self) -> list[dict[str, Any]]:
-        with self.lock, self._connect() as db:
-            return [dict(row) for row in db.execute(
-                "SELECT id, kind, value, created_at FROM sources ORDER BY id DESC LIMIT 200"
-            )]
+        return self.library.sources()
 
-    def add_source(self, kind: str, value: str) -> dict[str, Any]:
-        if kind not in {"user", "query"}:
-            raise ValueError("kind must be user or query")
-        value = value.strip().lstrip("@") if kind == "user" else value.strip()
-        if (kind == "user" and not _USERNAME.fullmatch(value)) or (
-            kind == "query" and not 1 <= len(value) <= 200
-        ):
-            raise ValueError("invalid X username or query")
-        with self.lock, self._connect() as db:
-            db.execute(
-                "INSERT OR IGNORE INTO sources(kind,value,created_at) VALUES(?,?,?)",
-                (kind, value, _utc_now()),
-            )
-            row = db.execute(
-                "SELECT id,kind,value,created_at FROM sources WHERE kind=? AND value=?",
-                (kind, value),
-            ).fetchone()
-            assert row is not None
-            return dict(row)
+    def add_source(self, kind: str, value: str, label: str = "") -> dict[str, Any]:
+        return self.library.add_source(kind, value, label)
 
     def remove_source(self, source_id: int) -> None:
-        with self.lock, self._connect() as db:
-            db.execute("DELETE FROM sources WHERE id=?", (source_id,))
+        self.library.remove_source(source_id)
 
     def source(self, source_id: int) -> dict[str, Any]:
-        with self.lock, self._connect() as db:
-            row = db.execute(
-                "SELECT id,kind,value FROM sources WHERE id=?", (source_id,)
-            ).fetchone()
-        if row is None:
-            raise ValueError("source not found")
-        return dict(row)
+        return self.library.source(source_id)
 
     def findings(self) -> list[dict[str, Any]]:
         with self.lock, self._connect() as db:
@@ -147,6 +122,10 @@ class ConsoleStore:
                     ),
                 )
                 inserted += cursor.rowcount
+        # Compatibility endpoint retains its original X-only counters and
+        # review rows. The new cross-platform library is the source of truth
+        # for the generic UI, migrated from older findings on first startup.
+        self.library.ingest(result)
         return {"fetched": len(items), "new": inserted, "backend": backend,
                 "warnings": result.get("warnings") or []}
 
@@ -229,6 +208,12 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             raise ValueError("JSON object required")
         return payload
 
+    def _query_arg(self, name: str) -> str:
+        from urllib.parse import parse_qs
+
+        parts = parse_qs(urlsplit(self.path).query)
+        return parts.get(name, [""])[0]
+
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
         if not self._allowed_host():
@@ -256,6 +241,12 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/sources":
             self._response(200, {"sources": self.server.store.sources()})
+        elif path == "/api/items":
+            self._response(200, {"items": self.server.store.library.items(
+                state=self._query_arg("state"), collection=self._query_arg("collection"),
+                query=self._query_arg("q"))})
+        elif path == "/api/collections":
+            self._response(200, {"collections": self.server.store.library.collections()})
         elif path == "/api/findings":
             self._response(200, {"findings": self.server.store.findings()})
         else:
@@ -269,7 +260,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/sources":
                 result = self.server.store.add_source(
-                    str(data.get("kind") or ""), str(data.get("value") or ""))
+                    str(data.get("kind") or ""), str(data.get("value") or ""),
+                    str(data.get("label") or ""))
                 self._response(200, {"source": result})
             elif path == "/api/sources/delete":
                 self.server.store.remove_source(int(data["source_id"]))
@@ -286,13 +278,25 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     if source["kind"] == "user":
                         result = asyncio.run(self.server.gateway.get_x_user_posts(
                             source["value"], limit))
-                    else:
+                    elif source["kind"] == "query":
                         result = asyncio.run(self.server.gateway.search_x(
                             source["value"], limit))
-                    summary = self.server.store.save_findings(result)
+                    elif source["kind"] == "web":
+                        result = asyncio.run(self.server.gateway.read_url(
+                            source["value"]))
+                    else:
+                        raise ValueError("unsupported source kind")
+                    summary = (self.server.store.library.ingest_web(result)
+                               if source["kind"] == "web"
+                               else self.server.store.save_findings(result))
                 finally:
                     self.server.research_lock.release()
                 self._response(200, summary)
+            elif path == "/api/items/review":
+                self.server.store.library.review(
+                    data.get("item_id"), data.get("state"), data.get("notes"),
+                    data.get("tags"), data.get("collections"))
+                self._response(200, {"ok": True})
             elif path == "/api/findings/review":
                 self.server.store.review(
                     str(data.get("post_id") or ""),
