@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentReach Operator Console</title><link rel="stylesheet" href="/console.css"></head>
+<body>
+<header><div><small>LOCAL OPERATOR CONSOLE / READ-ONLY</small><h1>AgentReach <span>調査・レビュー</span></h1><p>X収集元の登録、投稿の調査、OshiCalendar向け候補の確認</p></div><span class="chip">投稿機能：無効</span></header>
+<main>
+<section class="auth">
+<label for="token">コンソールアクセスキー（ローカル .env の AGENT_REACH_CONSOLE_ACCESS_TOKEN）</label>
+<div class="horizontal"><input id="token" type="password" autocomplete="off" placeholder="この画面でのみ入力・ブラウザには保存しません"><button id="connect">接続</button></div>
+<div class="muted" id="status" role="status">キーを入力して接続してください。キーはMCPトークンとは別です。</div>
+</section>
+<section class="columns">
+<div class="panel">
+<h2>収集元を登録</h2><p class="muted">Xのアカウントまたは検索キーワードを登録します。</p>
+<form id="source-form"><label for="kind">種類</label><select id="kind"><option value="user">公式アカウント</option><option value="query">検索キーワード</option></select><label for="value">ユーザー名 / キーワード</label><input id="value" required maxlength="200" placeholder="LoveLive_staff"><button type="submit">収集元を追加</button></form>
+<h3>登録済みの収集元</h3><div id="sources" class="stack"><p class="muted">未接続</p></div>
+</div>
+<div class="panel">
+<h2>調査結果</h2><p class="muted">投稿IDで重複を除外して保存します。分類・確認メモはこのPCのDockerボリュームに保持します。</p>
+<div class="horizontal"><button id="reload">結果を更新</button><span id="count" class="muted"></span></div>
+<div id="findings" class="stack"><p class="muted">未接続</p></div>
+</div>
+</section>
+<footer>調査結果は候補情報です。OshiCalendarへの自動登録やX投稿は行いません。Cookieやトークンは画面に出力しません。</footer>
+</main><script src="/console.js" defer></script></body></html>
