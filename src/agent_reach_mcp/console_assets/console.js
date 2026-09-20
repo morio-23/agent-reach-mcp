@@ -1,5 +1,6 @@
 "use strict";
 let accessToken = "";
+const selectedSources = new Set();
 const el = (id) => document.getElementById(id);
 const status = (message, bad = false) => {
   el("status").textContent = message;
@@ -30,6 +31,12 @@ async function loadSources() {
   if (!sources.length) root.append(node("p", "muted", "まだ収集元は登録されていません。"));
   for (const source of sources) {
     const entry = node("div", "source");
+    const selection = node("label", "source-select");
+    const checkbox = node("input", "");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedSources.has(source.id);
+    checkbox.onchange = () => checkbox.checked ? selectedSources.add(source.id) : selectedSources.delete(source.id);
+    selection.append(checkbox, node("span", "", "一括調査に含める"));
     const name = node("div", "", (source.label ? source.label + " · " : "") + (source.kind === "user" ? "@" : source.kind === "query" ? "X検索：" : "Web：") + source.value);
     const controls = node("div", "horizontal");
     const run = node("button", "secondary", "調査する");
@@ -42,17 +49,18 @@ async function loadSources() {
           (result.warnings || []).join(" "));
         await loadFindings();
         await loadCollections();
+        await loadRuns();
       } catch (error) { status("調査失敗：" + error.message, true); }
       finally { run.disabled = false; }
     };
     const remove = node("button", "danger", "削除");
     remove.onclick = async () => {
       if (!confirm("この収集元を削除しますか？取得済みの投稿は残ります。")) return;
-      try { await api("/api/sources/delete", {source_id: source.id}); await loadSources(); }
+      try { await api("/api/sources/delete", {source_id: source.id}); selectedSources.delete(source.id); await loadSources(); }
       catch (error) { status(error.message, true); }
     };
     controls.append(run, remove);
-    entry.append(name, controls);
+    entry.append(selection, name, controls);
     root.append(entry);
   }
 }
@@ -76,6 +84,7 @@ async function loadFindings() {
   const params = new URLSearchParams({
     state: el("filter-state").value,
     collection: el("filter-collection").value,
+    change: el("filter-change").value,
     q: el("filter-query").value.trim(),
   });
   const {items} = await api("/api/items?" + params.toString());
@@ -92,6 +101,9 @@ async function loadFindings() {
     const author = node("strong", "", (item.platform === "x" ? "@" : "") + (item.author || item.title || item.url || "unknown"));
     const date = node("span", "muted", item.published_at || item.captured_at || "日時不明");
     title.append(author, date);
+    if (item.change_kind === "new" || item.change_kind === "updated") {
+      title.append(node("span", "change-badge", item.change_kind === "new" ? "新着" : "更新あり"));
+    }
     const fullText = item.content || "";
     const previewLimit = item.platform === "web" ? 360 : 600;
     const body = node("p", "content", fullText.length > previewLimit ?
@@ -152,7 +164,30 @@ async function loadFindings() {
       (item.backend || "不明") + " / ID：" + item.external_id);
     card.append(title, body);
     if (expand) card.append(expand);
-    card.append(link, origin, reviewRow, tagsLabel, tags,
+    card.append(link, origin);
+    if (item.change_kind === "updated") {
+      const showHistory = node("button", "secondary expand", "前回との差分を表示");
+      const history = node("div", "revision-history");
+      showHistory.onclick = async () => {
+        showHistory.disabled = true;
+        try {
+          const {revisions} = await api("/api/revisions?item_id=" + encodeURIComponent(item.item_id));
+          history.replaceChildren();
+          if (!revisions.length) history.append(node("p", "muted", "過去の差分はありません。"));
+          for (const revision of revisions.slice(0, 3)) {
+            const block = node("details", "revision");
+            const summary = node("summary", "", revision.changed_at + " の変更");
+            const previous = node("pre", "", "変更前（抜粋）\n" + revision.old_content.slice(0, 2500));
+            const next = node("pre", "", "変更後（抜粋）\n" + revision.new_content.slice(0, 2500));
+            block.append(summary, previous, next);
+            history.append(block);
+          }
+        } catch (error) { status("差分の取得失敗：" + error.message, true); }
+        finally { showHistory.disabled = false; }
+      };
+      card.append(showHistory, history);
+    }
+    card.append(reviewRow, tagsLabel, tags,
       collectionsLabel, collections, notesLabel, notes);
     root.append(card);
   }
@@ -174,7 +209,7 @@ el("connect").onclick = async () => {
   if (!entered) return status("アクセスキーを入力してください。", true);
   accessToken = entered;
   el("token").value = "";
-  try { await loadCollections(); await Promise.all([loadSources(), loadFindings()]); status("接続しました。収集・整理モードです。"); }
+  try { await loadCollections(); await Promise.all([loadSources(), loadFindings(), loadRuns()]); status("接続しました。収集・整理モードです。"); }
   catch (error) { accessToken = ""; status("接続失敗：" + error.message, true); }
 };
 el("source-form").onsubmit = async (event) => {
@@ -193,7 +228,7 @@ el("reload").onclick = async () => {
   catch (error) { status(error.message, true); }
 };
 
-for (const name of ["filter-state", "filter-collection"]) {
+for (const name of ["filter-state", "filter-collection", "filter-change"]) {
   el(name).addEventListener("change", () => { if (accessToken) loadFindings().catch(e => status(e.message, true)); });
 }
 el("filter-query").addEventListener("change", () => {
@@ -203,3 +238,37 @@ el("kind").addEventListener("change", () => {
   el("value").placeholder = el("kind").value === "web" ? "https://example.com/news" :
     el("kind").value === "user" ? "LoveLive_staff" : "検索キーワード";
 });
+
+async function loadRuns() {
+  const {runs} = await api("/api/runs");
+  const root = el("runs");
+  root.replaceChildren();
+  if (!runs.length) root.append(node("p", "muted", "調査履歴はありません。"));
+  for (const run of runs.slice(0, 10)) {
+    root.append(node("div", "run", run.source_label + " · " +
+      (run.status === "success" ? "成功" : "失敗") + " · 新着" +
+      run.new_count + " / 更新" + run.updated_count + " · " + run.started_at +
+      (run.message ? " · " + run.message : "")));
+  }
+}
+el("batch-research").onclick = async () => {
+  const ids = [...selectedSources];
+  if (!ids.length || ids.length > 5) return status("一括調査は1〜5件を選択してください。", true);
+  const btn = el("batch-research");
+  btn.disabled = true;
+  el("batch-results").textContent = "選択した" + ids.length + "件を調査中…";
+  try {
+    const {results} = await api("/api/research/batch", {source_ids: ids, limit: 10});
+    const out = el("batch-results");
+    out.replaceChildren();
+    for (const result of results) {
+      out.append(node("p", result.status === "success" ? "muted" : "error",
+        result.source_label + "：" + (result.status === "success" ?
+          "成功・新着" + result.new + "件・更新" + (result.updated || 0) + "件" :
+          result.message)));
+    }
+    await Promise.all([loadFindings(), loadRuns()]);
+    status("一括調査が終了しました。収集元ごとの結果を確認してください。");
+  } catch (error) { status("一括調査失敗：" + error.message, true); }
+  finally { btn.disabled = false; }
+};
