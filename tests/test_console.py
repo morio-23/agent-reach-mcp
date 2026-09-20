@@ -65,3 +65,19 @@ def test_console_source_values_are_not_executable(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         store.add_source("query", "x" * 201)
     assert json.dumps(store.sources()) == "[]"
+
+
+def test_console_gateway_settings_ignore_docker_http_listener_defaults(monkeypatch):
+    """Docker image's public MCP defaults must not block the local console."""
+    from agent_reach_mcp.config import Settings, TransportMode
+
+    monkeypatch.setenv("AGENT_REACH_MCP_TRANSPORT", "streamable-http")
+    monkeypatch.setenv("AGENT_REACH_MCP_HOST", "0.0.0.0")
+    monkeypatch.setenv("AGENT_REACH_MCP_AUTH_MODE", "none")
+    monkeypatch.delenv("AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE", raising=False)
+    settings = Settings(
+        transport=TransportMode.STDIO, host="127.0.0.1", x_write_enabled=False
+    )
+    assert settings.transport is TransportMode.STDIO
+    assert settings.host == "127.0.0.1"
+    assert settings.x_write_enabled is False
