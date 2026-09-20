@@ -140,9 +140,14 @@ class ConsoleStore:
         # Compatibility endpoint retains its original X-only counters and
         # review rows. The new cross-platform library is the source of truth
         # for the generic UI, migrated from older findings on first startup.
-        self.library.ingest({**result, "source": {"platform": "x", **(result.get("source") or {})}})
-        return {"fetched": len(items), "new": inserted, "backend": backend,
-                "warnings": result.get("warnings") or []}
+        library_summary = self.library.ingest({
+            **result, "source": {**(result.get("source") or {}), "platform": "x"}
+        })
+        summary = {"fetched": len(items), "new": inserted, "backend": backend,
+                   "warnings": result.get("warnings") or []}
+        if library_summary["updated"]:
+            summary["updated"] = library_summary["updated"]
+        return summary
 
     def review(self, post_id: str, category: str, state: str, notes: str) -> None:
         if not re.fullmatch(r"\d{1,30}", post_id):
@@ -168,6 +173,21 @@ class ConsoleServer(ThreadingHTTPServer):
         self.store = store
         self.gateway = gateway
         self.research_lock = Lock()
+
+    def research(self, source: dict[str, Any], limit: int) -> dict[str, Any]:
+        if source["kind"] == "user":
+            result = asyncio.run(self.gateway.get_x_user_posts(source["value"], limit))
+        elif source["kind"] == "query":
+            result = asyncio.run(self.gateway.search_x(source["value"], limit))
+        elif source["kind"] == "web":
+            result = asyncio.run(self.gateway.read_url(source["value"]))
+        else:
+            raise ValueError("unsupported source kind")
+        summary = (self.store.library.ingest_web(result)
+                   if source["kind"] == "web"
+                   else self.store.save_findings(result))
+        self.store.library.record_run(source, status="success", summary=summary)
+        return summary
 
 
 class ConsoleHandler(BaseHTTPRequestHandler):
@@ -269,6 +289,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             self._response(200, {"items": items})
         elif path == "/api/collections":
             self._response(200, {"collections": self.server.store.library.collections()})
+        elif path == "/api/runs":
+            self._response(200, {"runs": self.server.store.library.runs()})
+        elif path == "/api/revisions":
+            try:
+                revisions = self.server.store.library.revisions(self._query_arg("item_id"))
+            except ValueError as exc:
+                self._response(400, {"error": str(exc)})
+                return
+            self._response(200, {"revisions": revisions})
         elif path == "/api/findings":
             self._response(200, {"findings": self.server.store.findings()})
         else:
@@ -297,23 +326,52 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     self._response(409, {"error": "research already running"})
                     return
                 try:
-                    if source["kind"] == "user":
-                        result = asyncio.run(self.server.gateway.get_x_user_posts(
-                            source["value"], limit))
-                    elif source["kind"] == "query":
-                        result = asyncio.run(self.server.gateway.search_x(
-                            source["value"], limit))
-                    elif source["kind"] == "web":
-                        result = asyncio.run(self.server.gateway.read_url(
-                            source["value"]))
-                    else:
-                        raise ValueError("unsupported source kind")
-                    summary = (self.server.store.library.ingest_web(result)
-                               if source["kind"] == "web"
-                               else self.server.store.save_findings(result))
+                    try:
+                        summary = self.server.research(source, limit)
+                    except Exception:
+                        self.server.store.library.record_run(
+                            source, status="failed",
+                            summary={"message": "調査失敗（接続・認証・取得元を確認）"},
+                        )
+                        raise
                 finally:
                     self.server.research_lock.release()
                 self._response(200, summary)
+            elif path == "/api/research/batch":
+                source_ids = data.get("source_ids")
+                limit = data.get("limit", 10)
+                if (not isinstance(source_ids, list) or not 1 <= len(source_ids) <= 5
+                        or any(type(sid) is not int or sid <= 0 for sid in source_ids)
+                        or len(set(source_ids)) != len(source_ids)):
+                    raise ValueError("choose 1-5 distinct source IDs")
+                if type(limit) is not int or not 1 <= limit <= 10:
+                    raise ValueError("batch limit must be 1-10")
+                sources = [self.server.store.source(sid) for sid in source_ids]
+                if not self.server.research_lock.acquire(blocking=False):
+                    self._response(409, {"error": "research already running"})
+                    return
+                results = []
+                try:
+                    for source in sources:
+                        try:
+                            summary = self.server.research(source, limit)
+                            results.append({"source_id": source["id"],
+                                            "source_label": source.get("label") or source["value"],
+                                            "status": "success", **summary})
+                        except Exception:
+                            # Each failure is isolated; never return credential-bearing
+                            # backend exceptions to the browser.
+                            self.server.store.library.record_run(
+                                source, status="failed",
+                                summary={"message": "調査失敗（接続・認証・取得元を確認）"},
+                            )
+                            results.append({"source_id": source["id"],
+                                            "source_label": source.get("label") or source["value"],
+                                            "status": "failed",
+                                            "message": "調査失敗（接続・認証・取得元を確認）"})
+                finally:
+                    self.server.research_lock.release()
+                self._response(200, {"results": results})
             elif path == "/api/items/review":
                 self.server.store.library.review(
                     data.get("item_id"), data.get("state"), data.get("notes"),
