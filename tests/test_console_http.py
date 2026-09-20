@@ -118,3 +118,35 @@ def test_platform_neutral_web_research_and_review(live_console: str) -> None:
     assert reviewed[0]["collections"] == ["General research"]
     with request(live_console, "/api/collections") as response:
         assert json.load(response)["collections"] == ["General research"]
+
+
+def test_batch_is_bounded_and_history_is_queryable(live_console: str) -> None:
+    with request(live_console, "/api/sources",
+                 {"kind": "user", "value": "LoveLive_staff"}) as response:
+        user_id = json.load(response)["source"]["id"]
+    with request(live_console, "/api/sources",
+                 {"kind": "web", "value": "https://example.com/news"}) as response:
+        web_id = json.load(response)["source"]["id"]
+    with pytest.raises(HTTPError) as invalid:
+        request(live_console, "/api/research/batch", {
+            "source_ids": [user_id] * 6, "limit": 10,
+        })
+    assert invalid.value.code == 400
+    with request(live_console, "/api/research/batch", {
+        "source_ids": [user_id, web_id], "limit": 2,
+    }) as response:
+        results = json.load(response)["results"]
+    assert len(results) == 2
+    assert all(row["status"] == "success" for row in results)
+    assert all(row["new"] == 1 for row in results)
+    with request(live_console, "/api/runs") as response:
+        history = json.load(response)["runs"]
+    assert len(history) == 2
+    assert all(row["status"] == "success" for row in history)
+    with request(live_console, "/api/research/batch", {
+        "source_ids": [user_id, web_id], "limit": 2,
+    }) as response:
+        again = json.load(response)["results"]
+    assert all(row["new"] == 0 for row in again)
+    with request(live_console, "/api/items?change=new") as response:
+        assert len(json.load(response)["items"]) == 2
