@@ -125,7 +125,7 @@ class ConsoleStore:
         # Compatibility endpoint retains its original X-only counters and
         # review rows. The new cross-platform library is the source of truth
         # for the generic UI, migrated from older findings on first startup.
-        self.library.ingest(result)
+        self.library.ingest({**result, "source": {"platform": "x", **(result.get("source") or {})}})
         return {"fetched": len(items), "new": inserted, "backend": backend,
                 "warnings": result.get("warnings") or []}
 
