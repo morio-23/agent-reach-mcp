@@ -76,6 +76,7 @@ def test_console_gateway_settings_ignore_docker_http_listener_defaults(monkeypat
     monkeypatch.setenv("AGENT_REACH_MCP_AUTH_MODE", "none")
     monkeypatch.delenv("AGENT_REACH_MCP_ALLOW_INSECURE_REMOTE", raising=False)
     settings = Settings(
+        _env_file=None,  # Isolate from the developer local dotenv.
         transport=TransportMode.STDIO, host="127.0.0.1", x_write_enabled=False
     )
     assert settings.transport is TransportMode.STDIO
