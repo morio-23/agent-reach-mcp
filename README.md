@@ -95,13 +95,15 @@ configuration, Cloudflare dashboard steps and verification commands.
 
 ## Local operator console (optional)
 
-For X source registration, manual investigation and OshiCalendar candidate review
-**without relying on ChatGPT's MCP tool execution**, enable the separate
-loopback-only operator UI. It reuses the persisted Agent Reach credentials and
-stores source registrations and findings in its own SQLite database. This first
-version is **read-only for X**: no posting, calendar publication, or scheduled
-collection is performed. It does not change the public MCP endpoint or the
-Cloudflare Tunnel route.
+To register information sources, investigate X posts and Web pages, and
+organize reusable research **without relying on ChatGPT's MCP tool execution**,
+enable the separate loopback-only operator UI. It reuses the persisted Agent
+Reach credentials and saves information in a cross-platform SQLite library,
+with arbitrary tags, collections, review states and notes. This first version
+is **read-only toward external services**: no posting, publication, scheduled
+collection, or external service registration is performed. OshiCalendar is just
+one possible future integration, not a required dependency. It does not change
+the public MCP endpoint or the Cloudflare Tunnel route.
 
 See [Operator console setup and security](docs/operator-console.md) for the
 Windows Docker deployment and local `http://127.0.0.1:8090/` UI.
