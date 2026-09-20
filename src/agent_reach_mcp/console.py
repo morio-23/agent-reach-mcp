@@ -19,7 +19,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
 
-from .config import Settings
+from .config import Settings, TransportMode
 from .gateway import Gateway
 
 _USERNAME = re.compile(r"^[A-Za-z0-9_]{1,15}$")
@@ -327,7 +327,14 @@ def main() -> None:
     os.umask(0o077)
     state_dir = Path(os.environ.get("AGENT_REACH_CONSOLE_STATE_DIR",
                                    "/home/appuser/.agent-reach"))
-    gateway = Gateway(Settings(x_write_enabled=False))
+    # The console uses Gateway only for read operations. Docker's image defaults
+    # describe the separate HTTP MCP service; do not inherit its remote
+    # listener configuration here or weaken the MCP origin safety guard.
+    gateway = Gateway(Settings(
+        transport=TransportMode.STDIO,
+        host="127.0.0.1",
+        x_write_enabled=False,
+    ))
     server = ConsoleServer(("0.0.0.0", port), token,
                            ConsoleStore(state_dir / "console.sqlite3"), gateway)
     print(f"AgentReach operator console listening on container port {port} (read-only)")
