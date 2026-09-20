@@ -93,6 +93,19 @@ See [Cloudflare Tunnel deployment](docs/cloudflare-tunnel.md) for the Windows
 8085 example, Docker service URL (`http://agent-reach-mcp:8080`), local token
 configuration, Cloudflare dashboard steps and verification commands.
 
+## Local operator console (optional)
+
+For X source registration, manual investigation and OshiCalendar candidate review
+**without relying on ChatGPT's MCP tool execution**, enable the separate
+loopback-only operator UI. It reuses the persisted Agent Reach credentials and
+stores source registrations and findings in its own SQLite database. This first
+version is **read-only for X**: no posting, calendar publication, or scheduled
+collection is performed. It does not change the public MCP endpoint or the
+Cloudflare Tunnel route.
+
+See [Operator console setup and security](docs/operator-console.md) for the
+Windows Docker deployment and local `http://127.0.0.1:8090/` UI.
+
 ## ChatGPT
 
 ChatGPT connects to a remote MCP endpoint rather than directly to local stdio. For a private/home-server deployment, prefer loopback `Streamable HTTP` behind OpenAI Secure MCP Tunnel. For a public HTTPS deployment, use OAuth/OIDC.
