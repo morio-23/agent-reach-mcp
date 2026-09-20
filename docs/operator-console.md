@@ -1,15 +1,17 @@
 # Local operator console (MVP)
 
 The console is a **separate, local-only** screen for using AgentReach without
-requiring ChatGPT to execute MCP tools. It registers X usernames or search
-queries, fetches results through the existing twitter-cli / Twifork adapter,
-deduplicates results by post ID, and stores review classifications and notes.
+requiring ChatGPT to execute MCP tools. It registers X usernames, X search queries and Web page URLs. X retrieval
+uses the existing twitter-cli / Twifork adapter; Web retrieval uses the existing
+read_url gateway. A platform-neutral library deduplicates by platform and
+external ID, with reusable tags, collections, review state and notes.
 
 **Scope in this PR:** source registration/removal, manual investigation,
-backend/warning display, review of event/product/deadline findings, durable
-results. **Not in this PR:** X posting, posting drafts, automated posting,
-scheduled collection, or OshiCalendar registration. Nothing is sent to X
-except read requests. The existing MCP deployment remains read-only.
+backend/warning display, generic item library, free-form tags/collections,
+status-based review and durable storage. **Not in this PR:** X posting,
+posting drafts, automated posting, scheduled collection, RSS/YouTube source
+registration, change-history tracking, or any external application registration.
+The existing MCP deployment remains read-only.
 
 ## Deploy on Windows / Docker Desktop
 
@@ -48,8 +50,13 @@ console uses a **separate loopback-only port**, does not change the MCP's
    token from your local `.env`. The page does not store the token in browser
    storage or cookies; it stays in memory until the page closes or reloads.
 
-5. Register `LoveLive_staff` as a username or `ラブライブ` as a search
-   query. Click `調査する`, then classify findings and save review notes.
+5. Register `LoveLive_staff` as an X username, `ラブライブ` as an X
+   search query or `https://example.com/news` as a Web page URL. Click
+   `調査する`, then add tags, collections, review status and notes in the
+   library. Existing sources and reviews are migrated automatically, once.
+   X and Web remain separately identifiable; the original tables are retained
+   for rollback. A repeated fetch of the same URL currently keeps the first
+   stored snapshot rather than updating its body; change history is future work.
 
 The console uses the same persisted `agent-reach-data` volume as MCP for
 AgentReach's manually configured X credentials; it stores its own SQLite DB at
@@ -74,10 +81,28 @@ docker compose -f compose.private.yml -f compose.console.yml config --quiet
 python scripts/http_verify.py --url http://127.0.0.1:8085/mcp
 ```
 
-Then from the local console test username registration, X investigation,
-review persistence after reload, and backend fallback. Check that the
+Then test username/query/URL registration, X and Web investigation, tag and
+collection persistence, filters, and review persistence after reload. The
+existing source and finding records must still be visible after the upgrade. Check that the
 published ChatGPT MCP continues exposing **six read-only tools** and that
 `https://mcp.morio-23.net/mcp` remains protected by Cloudflare Access.
 
 This is a manually triggered console: it deliberately does not scrape X
 periodically, retry failed posting, or publish calendar events.
+
+### Data structure
+
+`sources` and `findings` are the legacy tables and are not deleted.
+`source_registry` contains X usernames, X queries and Web page URLs.
+`library_items` stores a platform-neutral item ID (`x:<post-id>` or a
+`web:` ID derived from the canonical page URL). Separate tables store free-form
+tags and named collections. This makes the same item reusable across workflows
+without tying it to OshiCalendar. The Web URL is verified by the existing
+Gateway.read_url path before it is fetched; do not interpret this console as a
+general network proxy.
+
+For this MVP, investigation is manually triggered for one source at a time,
+and the latest 300 matching items are displayed. The Web source represents a
+single page (not a domain crawl or RSS polling). Workflow-specific extraction,
+revision tracking, batch research, scheduling and export adapters can be added
+without changing stored source records.
