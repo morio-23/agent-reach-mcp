@@ -80,3 +80,52 @@ def test_generic_source_validation_and_rejection(tmp_path: Path) -> None:
         store.library.review("x:123", "new", "", ["bad\ntag"], [])
     with pytest.raises(ValueError):
         store.library.items(state="invalid")
+
+
+def test_web_change_tracking_preserves_reviews_and_stores_prior_versions(tmp_path: Path) -> None:
+    library = ConsoleStore(tmp_path / "console.sqlite3").library
+    url = "https://example.com/change"
+    def response(body: str):
+        return {"url": url, "content": body,
+                "source": {"platform": "web", "backend": "fake-reader"}}
+
+    first = library.ingest_web(response("first version"))
+    assert first["new"] == 1
+    assert first["updated"] == 0
+    item = library.items(change="new")[0]
+    library.review(item["item_id"], "reviewed", "Keep my note", ["important"], ["Project B"])
+    same = library.ingest_web(response("first version"))
+    assert same["new"] == same["updated"] == 0
+    assert library.revisions(item["item_id"]) == []
+    updated = library.ingest_web(response("second version"))
+    assert updated["new"] == 0
+    assert updated["updated"] == 1
+    assert library.items(change="new") == []
+    current = library.items(change="updated")[0]
+    assert current["content"] == "second version"
+    assert current["version"] == 2
+    assert current["state"] == "reviewed"
+    assert current["notes"] == "Keep my note"
+    assert current["tags"] == ["important"]
+    assert current["collections"] == ["Project B"]
+    history = library.revisions(item["item_id"])
+    assert len(history) == 1
+    assert history[0]["old_content"] == "first version"
+    assert history[0]["new_content"] == "second version"
+    restarted = ConsoleStore(tmp_path / "console.sqlite3").library
+    assert restarted.items(change="updated")[0]["version"] == 2
+    assert restarted.revisions(item["item_id"])[0]["old_content"] == "first version"
+
+
+def test_bounded_per_source_run_history(tmp_path: Path) -> None:
+    library = ConsoleStore(tmp_path / "console.sqlite3").library
+    src = library.add_source("web", "https://example.com/updated", "Docs")
+    library.record_run(src, status="success",
+                       summary={"fetched": 1, "new": 1, "updated": 0,
+                                "backend": "fake-reader"})
+    library.record_run(src, status="failed", summary={"message": "read failed"})
+    runs = library.runs()
+    assert len(runs) == 2
+    assert runs[0]["source_label"] == "Docs"
+    assert runs[0]["status"] == "failed"
+    assert runs[1]["new_count"] == 1
