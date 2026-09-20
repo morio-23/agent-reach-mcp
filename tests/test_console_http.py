@@ -19,6 +19,10 @@ class FakeGateway:
                        "url": f"https://x.com/{username}/status/1234567890"}][:limit],
         }
 
+    async def read_url(self, url: str):
+        return {"url": url, "content": "Web research example",
+                "source": {"platform": "web", "backend": "fake-reader"}}
+
     async def search_x(self, query: str, limit: int):
         return {"source": {"backend": "twifork"}, "warnings": ["fallback"],
                 "items": [{"id": "9876543210", "author": {"username": "source"},
@@ -87,3 +91,30 @@ def test_console_research_and_review_endpoints(live_console: str) -> None:
     assert len(result) == 1
     assert result[0]["category"] == "event"
     assert result[0]["notes"] == "needs review"
+
+
+def test_platform_neutral_web_research_and_review(live_console: str) -> None:
+    with request(live_console, "/api/sources",
+                 {"kind": "web", "value": "https://example.com/news",
+                  "label": "News"}) as response:
+        source = json.load(response)["source"]
+    assert source["label"] == "News"
+    with request(live_console, "/api/research",
+                 {"source_id": source["id"], "limit": 1}) as response:
+        assert json.load(response)["new"] == 1
+    with request(live_console, "/api/items") as response:
+        items = json.load(response)["items"]
+    assert len(items) == 1
+    assert items[0]["platform"] == "web"
+    item_id = items[0]["item_id"]
+    with request(live_console, "/api/items/review",
+                 {"item_id": item_id, "state": "reviewed", "notes": "Saved",
+                  "tags": ["news"], "collections": ["General research"]}) as response:
+        assert json.load(response)["ok"] is True
+    with request(live_console, "/api/items?state=reviewed&collection=General%20research") as response:
+        reviewed = json.load(response)["items"]
+    assert len(reviewed) == 1
+    assert reviewed[0]["tags"] == ["news"]
+    assert reviewed[0]["collections"] == ["General research"]
+    with request(live_console, "/api/collections") as response:
+        assert json.load(response)["collections"] == ["General research"]
