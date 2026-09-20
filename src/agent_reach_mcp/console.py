@@ -6,12 +6,12 @@ posting; a write workflow requires a distinct, audited approval implementation.
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
 import hmac
 import json
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
