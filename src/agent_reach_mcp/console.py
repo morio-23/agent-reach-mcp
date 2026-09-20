@@ -79,10 +79,25 @@ class ConsoleStore:
         return self.library.sources()
 
     def add_source(self, kind: str, value: str, label: str = "") -> dict[str, Any]:
-        return self.library.add_source(kind, value, label)
+        source = self.library.add_source(kind, value, label)
+        # Preserve the original X source registry for a safe rollback.
+        if source["kind"] in {"user", "query"}:
+            with self.lock, self._connect() as db:
+                db.execute(
+                    "INSERT OR IGNORE INTO sources(id,kind,value,created_at) VALUES(?,?,?,?)",
+                    (source["id"], source["kind"], source["value"], source["created_at"]),
+                )
+        return source
 
     def remove_source(self, source_id: int) -> None:
+        source = self.library.source(source_id)
         self.library.remove_source(source_id)
+        if source["kind"] in {"user", "query"}:
+            with self.lock, self._connect() as db:
+                db.execute(
+                    "DELETE FROM sources WHERE kind=? AND value=?",
+                    (source["kind"], source["value"]),
+                )
 
     def source(self, source_id: int) -> dict[str, Any]:
         return self.library.source(source_id)
