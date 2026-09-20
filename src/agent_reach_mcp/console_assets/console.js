@@ -30,7 +30,7 @@ async function loadSources() {
   if (!sources.length) root.append(node("p", "muted", "まだ収集元は登録されていません。"));
   for (const source of sources) {
     const entry = node("div", "source");
-    const name = node("div", "", (source.kind === "user" ? "@" : "検索：") + source.value);
+    const name = node("div", "", (source.label ? source.label + " · " : "") + (source.kind === "user" ? "@" : source.kind === "query" ? "X検索：" : "Web：") + source.value);
     const controls = node("div", "horizontal");
     const run = node("button", "secondary", "調査する");
     run.onclick = async () => {
@@ -41,6 +41,7 @@ async function loadSources() {
         status("取得 " + result.fetched + "件・新規 " + result.new + "件（" + result.backend + "）。" +
           (result.warnings || []).join(" "));
         await loadFindings();
+        await loadCollections();
       } catch (error) { status("調査失敗：" + error.message, true); }
       finally { run.disabled = false; }
     };
@@ -55,56 +56,84 @@ async function loadSources() {
     root.append(entry);
   }
 }
+async function loadCollections() {
+  const {collections} = await api("/api/collections");
+  const select = el("filter-collection");
+  const current = select.value;
+  select.replaceChildren();
+  const all = node("option", "", "すべて");
+  all.value = "";
+  select.append(all);
+  for (const name of collections) {
+    const option = node("option", "", name);
+    option.value = name;
+    select.append(option);
+  }
+  select.value = collections.includes(current) ? current : "";
+}
+
 async function loadFindings() {
-  const {findings} = await api("/api/findings");
-  el("count").textContent = "保存済み " + findings.length + "件（最大300件表示）";
+  const params = new URLSearchParams({
+    state: el("filter-state").value,
+    collection: el("filter-collection").value,
+    q: el("filter-query").value.trim(),
+  });
+  const {items} = await api("/api/items?" + params.toString());
+  el("count").textContent = "表示 " + items.length + "件（最大300件）";
   const root = el("findings");
   root.replaceChildren();
-  if (!findings.length) root.append(node("p", "muted", "調査を実行すると投稿が表示されます。"));
-  for (const finding of findings) {
+  if (!items.length) root.append(node("p", "muted", "一致するデータがありません。収集元を登録して調査するか、フィルターを変更してください。"));
+  for (const item of items) {
     const card = node("article", "finding");
     const title = node("div", "horizontal");
-    const author = node("strong", "", "@" + (finding.author || "unknown"));
-    const date = node("span", "muted", finding.published_at || "日時不明");
+    const author = node("strong", "", (item.platform === "x" ? "@" : "") + (item.author || item.title || item.url || "unknown"));
+    const date = node("span", "muted", item.published_at || item.captured_at || "日時不明");
     title.append(author, date);
-    const body = node("p", "content", finding.content);
-    const link = node("a", "", "Xで元投稿を確認 ↗");
-    const url = finding.url;
-    if (url && /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[A-Za-z0-9_]+\/status\/\d+$/.test(url)) {
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-    } else {
-      link.textContent = "投稿ID：" + finding.post_id;
-    }
-    const category = node("select", "");
-    for (const [value, label] of [["other","未分類"],["event","イベント・配信"],["product","商品"],["deadline","締切"]]) {
-      const opt = node("option", "", label); opt.value = value;
-      category.append(opt);
-    }
-    category.value = finding.category;
+    const body = node("p", "content", item.content);
+    const link = node("a", "", "元の情報を開く ↗");
+    try {
+      const url = new URL(item.url);
+      if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) {
+        link.href = url.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+      } else { link.textContent = "参照ID：" + item.external_id; }
+    } catch { link.textContent = "参照ID：" + item.external_id; }
     const review = node("select", "");
     for (const [value, label] of [["new","要確認"],["reviewed","確認済み"],["ignored","対象外"]]) {
-      const opt = node("option", "", label); opt.value = value;
-      review.append(opt);
+      const option = node("option", "", label); option.value = value;
+      review.append(option);
     }
-    review.value = finding.state;
-    const notes = node("textarea", ""); notes.value = finding.notes || "";
-    notes.maxLength = 2000; notes.rows = 2; notes.placeholder = "登録候補の日時・URL・確認事項";
-    const save = node("button", "secondary", "レビューを保存");
+    review.value = item.state;
+    const tagsLabel = node("label", "", "タグ（カンマ区切り）");
+    const tags = node("input", ""); tags.value = item.tags.join(", ");
+    tags.maxLength = 500; tags.placeholder = "例：イベント, 締切, 調査資料";
+    const collectionsLabel = node("label", "", "コレクション（カンマ区切り）");
+    const collections = node("input", ""); collections.value = item.collections.join(", ");
+    collections.maxLength = 500; collections.placeholder = "例：ラブライブ, 案件調査";
+    const notesLabel = node("label", "", "メモ");
+    const notes = node("textarea", ""); notes.value = item.notes || "";
+    notes.maxLength = 2000; notes.rows = 2; notes.placeholder = "確認内容・次の作業";
+    const save = node("button", "secondary", "整理内容を保存");
     save.onclick = async () => {
       save.disabled = true;
       try {
-        await api("/api/findings/review", {post_id: finding.post_id, category: category.value,
-          state: review.value, notes: notes.value});
-        status("レビューを保存しました：" + finding.post_id);
-      } catch (error) { status(error.message, true); }
+        await api("/api/items/review", {
+          item_id: item.item_id, state: review.value, notes: notes.value,
+          tags: tags.value.split(",").map((t) => t.trim()).filter(Boolean),
+          collections: collections.value.split(",").map((t) => t.trim()).filter(Boolean),
+        });
+        status("保存しました：" + item.item_id);
+        await loadCollections();
+      } catch (error) { status("保存失敗：" + error.message, true); }
       finally { save.disabled = false; }
     };
     const reviewRow = node("div", "horizontal");
-    reviewRow.append(category, review, save);
-    const origin = node("p", "muted", "取得元：" + (finding.source_backend || "不明") + " / 投稿ID：" + finding.post_id);
-    card.append(title, body, link, origin, reviewRow, notes);
+    reviewRow.append(review, save);
+    const origin = node("p", "muted", "プラットフォーム：" + item.platform + " / バックエンド：" +
+      (item.backend || "不明") + " / ID：" + item.external_id);
+    card.append(title, body, link, origin, reviewRow, tagsLabel, tags,
+      collectionsLabel, collections, notesLabel, notes);
     root.append(card);
   }
 }
@@ -113,14 +142,16 @@ el("connect").onclick = async () => {
   if (!entered) return status("アクセスキーを入力してください。", true);
   accessToken = entered;
   el("token").value = "";
-  try { await Promise.all([loadSources(), loadFindings()]); status("接続しました。読み取り専用モードです。"); }
+  try { await loadCollections(); await Promise.all([loadSources(), loadFindings()]); status("接続しました。収集・整理モードです。"); }
   catch (error) { accessToken = ""; status("接続失敗：" + error.message, true); }
 };
 el("source-form").onsubmit = async (event) => {
   event.preventDefault();
   try {
-    await api("/api/sources", {kind: el("kind").value, value: el("value").value});
+    await api("/api/sources", {kind: el("kind").value, value: el("value").value,
+      label: el("source-label").value});
     el("value").value = "";
+    el("source-label").value = "";
     await loadSources();
     status("収集元を登録しました。");
   } catch (error) { status(error.message, true); }
@@ -129,3 +160,14 @@ el("reload").onclick = async () => {
   try { await loadFindings(); status("更新しました。"); }
   catch (error) { status(error.message, true); }
 };
+
+for (const name of ["filter-state", "filter-collection"]) {
+  el(name).addEventListener("change", () => { if (accessToken) loadFindings().catch(e => status(e.message, true)); });
+}
+el("filter-query").addEventListener("change", () => {
+  if (accessToken) loadFindings().catch(e => status(e.message, true));
+});
+el("kind").addEventListener("change", () => {
+  el("value").placeholder = el("kind").value === "web" ? "https://example.com/news" :
+    el("kind").value === "user" ? "LoveLive_staff" : "検索キーワード";
+});
