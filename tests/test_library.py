@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from agent_reach_mcp.console import ConsoleStore
-from agent_reach_mcp.library import LibraryStore
 
 
 def test_legacy_migration_preserves_sources_findings_and_reviews(tmp_path: Path) -> None:
