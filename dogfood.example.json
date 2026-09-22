@@ -1,0 +1,17 @@
+{
+  "endpoint": "http://127.0.0.1:8080/mcp",
+  "read_url": "https://example.com",
+  "x": {
+    "enabled": true,
+    "username": "OpenAI",
+    "query": "AI",
+    "limit": 5,
+    "search_from_user": true,
+    "require_search_results": true
+  },
+  "youtube": {
+    "enabled": true,
+    "url": "https://www.youtube.com/watch?v=aircAruvnKk",
+    "languages": ["en"]
+  }
+}
