@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     oauth_jwks_url: str | None = None
     oauth_scopes: list[str] = Field(default_factory=lambda: ["agent-reach:read"])
     oauth_algorithms: list[str] = Field(default_factory=lambda: ["RS256", "ES256"])
-    request_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    request_timeout_seconds: float = Field(default=10.0, gt=0, le=300)
     max_output_bytes: int = Field(
         default=5 * 1024 * 1024, ge=1024, le=50 * 1024 * 1024
     )

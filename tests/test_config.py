@@ -11,6 +11,7 @@ def test_defaults_are_local_stdio() -> None:
     assert settings.host == "127.0.0.1"
     assert settings.x_twifork_fallback_enabled is True
     assert settings.x_write_enabled is False
+    assert settings.request_timeout_seconds == 10
 
 
 def test_none_auth_rejects_remote_http_by_default() -> None:

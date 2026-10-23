@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlparse
 
 from agent_reach.channels.twitter import twitter_cli_child_env
 from agent_reach.config import Config
+from agent_reach.utils.text import scrub_url_credentials
 from agent_reach.utils.url import normalize_public_http_url
 
 from .errors import BackendExecutionError, BackendUnavailableError
@@ -146,8 +147,8 @@ class TwitterAdapter:
             result = await fallback()
         except (BackendUnavailableError, BackendExecutionError) as fallback_error:
             raise BackendExecutionError(
-                "twitter-cli failed and twifork fallback also failed: "
-                f"{type(fallback_error).__name__}: {str(fallback_error)[:300]}"
+                f"twitter-cli: {scrub_url_credentials(primary_error)[:400]}; "
+                f"twifork: {scrub_url_credentials(fallback_error)[:400]}"
             ) from None
         result.warnings.insert(
             0,
@@ -231,7 +232,7 @@ class TwitterAdapter:
             )
         if cp.returncode != 0:
             msg = (cp.stderr or "twitter-cli request failed").strip().splitlines()[-1]
-            raise BackendExecutionError(msg[:500])
+            raise BackendExecutionError(scrub_url_credentials(msg)[:500])
         if payload is None or payload.get("ok") is not True:
             raise BackendExecutionError(
                 "twitter-cli returned an invalid structured response"
@@ -324,7 +325,7 @@ class TwitterAdapter:
         except Exception as exc:
             message = str(exc).strip() or "request failed"
             raise BackendExecutionError(
-                f"twifork {operation_name} failed: {message[:500]}"
+                f"twifork {operation_name} failed: {scrub_url_credentials(message)[:500]}"
             ) from exc
 
 

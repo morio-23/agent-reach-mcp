@@ -1,0 +1,20 @@
+name: X reliability
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  real-http-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install '.[dev,x]'
+      - run: ruff check .
+      - run: mypy --follow-imports=skip --ignore-missing-imports src/agent_reach_mcp/config.py src/agent_reach_mcp/server.py
+      - run: pytest -q tests/test_x_reliability.py
+      - run: python scripts/local_verify.py
