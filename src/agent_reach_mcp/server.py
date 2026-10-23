@@ -4,6 +4,7 @@ from typing import Any
 
 from agent_reach.utils.text import scrub_url_credentials
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .auth import build_auth
 from .config import Settings, TransportMode
@@ -97,7 +98,7 @@ async def _safe_call(function: Any, *args: Any) -> Any:
     try:
         return await function(*args)
     except Exception as exc:
-        raise RuntimeError(str(scrub_url_credentials(exc))[:1000]) from None
+        raise ToolError(scrub_url_credentials(exc)[:1000]) from None
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -132,6 +133,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             port=settings.port,
             streamable_http_path=settings.mcp_path,
             json_response=True,
+            stateless_http=True,
         )
 
 
